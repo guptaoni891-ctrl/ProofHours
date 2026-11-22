@@ -1,0 +1,58 @@
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1a1a1a; background: #f6f7f9; }
+header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem 1.5rem; background: #12355b; color: #fff; }
+header h1 { margin: 0; font-size: 1.4rem; }
+.sub { margin: 0; color: #d6e2f0; font-size: .9rem; }
+.wallet { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.pill { padding: .3rem .8rem; border-radius: 999px; font-weight: 600; font-size: .85rem; background: #e5e7eb; color: #1a1a1a; }
+.pill.admin { background: #fde68a; }
+.pill.coord { background: #bbf7d0; }
+nav { display: flex; flex-wrap: wrap; gap: .25rem; padding: .5rem 1.5rem 0; background: #12355b; }
+nav button { background: transparent; color: #fff; border: 0; border-radius: 6px 6px 0 0; padding: .6rem 1rem; }
+nav button[aria-selected="true"] { background: #f6f7f9; color: #12355b; font-weight: 700; }
+main { max-width: 1100px; margin: 0 auto; padding: 1rem 1.5rem 3rem; }
+footer { text-align: center; padding: 1rem; font-size: .85rem; color: #444; }
+button { font: inherit; cursor: pointer; padding: .55rem 1rem; border-radius: 6px; border: 1px solid #12355b; background: #12355b; color: #fff; }
+button.secondary, .demo-buttons button { background: #fff; color: #12355b; }
+button:disabled { opacity: .5; cursor: wait; }
+:focus-visible { outline: 3px solid #f59e0b; outline-offset: 2px; }
+input, select { font: inherit; width: 100%; padding: .5rem; border: 1px solid #6b7280; border-radius: 6px; background: #fff; }
+label { display: block; font-weight: 600; font-size: .9rem; }
+label.check { display: flex; gap: .5rem; align-items: center; font-weight: 400; margin: .5rem 0 1rem; }
+label.check input { width: auto; }
+.grid { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: end; }
+.grid h3, .grid .msg, .grid #receipt { grid-column: 1 / -1; margin: 0; }
+.card { background: #fff; border: 1px solid #d1d5db; border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+.demo-buttons { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: 1rem; }
+.demo-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.msg { margin: .75rem 0; }
+.msg:empty { display: none; }
+.msg.ok { color: #0a6b2c; }
+.msg.err { color: #9b1c1c; }
+code { font-size: .85em; background: #eef1f5; padding: 0 .25rem; border-radius: 4px; }
+.wrap { word-break: break-all; }
+.record { margin: 1.25rem 0; }
+.verdict { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: baseline; padding: 1rem 1.25rem; border-radius: 10px 10px 0 0; border: 2px solid; }
+.verdict strong { font-size: 1.8rem; letter-spacing: .02em; }
+.verdict.valid { background: #e6f4ea; border-color: #0a6b2c; color: #0a4d20; }
+.verdict.corrected { background: #fff4d6; border-color: #8a5a00; color: #6b4500; }
+.verdict.revoked { background: #fde8ea; border-color: #9b1c1c; color: #7f1414; }
+.verdict.notfound { background: #eceff3; border-color: #4b5563; color: #1f2937; margin-top: 1rem; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #d1d5db; border-top: 0; border-radius: 0 0 10px 10px; background: #fff; }
+.col { padding: 1rem 1.25rem; min-width: 0; }
+.col + .col { border-left: 1px solid #d1d5db; background: #fafbfc; }
+.col h3 { margin-top: 0; font-size: 1rem; text-transform: uppercase; letter-spacing: .05em; color: #12355b; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: .3rem .75rem; margin: 0; font-size: .92rem; }
+dt { font-weight: 600; color: #374151; }
+dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.trail { padding-left: 1.25rem; border-left: 3px solid #12355b; margin-left: .25rem; }
+.trail li { margin-bottom: .4rem; }
+.tx { display: block; font-size: .85rem; color: #4b5563; }
+.claim { margin-top: 1rem; padding: .75rem 1.25rem; border-radius: 10px; font-weight: 700; font-size: 1.15rem; }
+.claim.ok { background: #e6f4ea; color: #0a4d20; }
+.claim.bad { background: #9b1c1c; color: #fff; }
+.receipt { border: 2px dashed #12355b; border-radius: 10px; padding: 1rem; margin-top: .5rem; }
+.receipt h4 { margin-top: 0; }
+.receipt button { margin-top: .5rem; }
+.warn { color: #7f1414; font-weight: 600; }
+@media (max-width: 700px) { .cols { grid-template-columns: 1fr; } .col + .col { border-left: 0; border-top: 1px solid #d1d5db; } }

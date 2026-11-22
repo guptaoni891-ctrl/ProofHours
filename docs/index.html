@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HASH-IT-OUT · Volunteer Hours Verifier</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div>
+    <h1>Volunteer Hours Verifier</h1>
+    <p class="sub">Checks NGO-signed volunteer hours on Base Sepolia (test network). Demo data only.</p>
+  </div>
+  <div class="wallet">
+    <span id="rolePill" class="pill" role="status">NO WALLET</span>
+    <button id="connectBtn" type="button">Connect wallet</button>
+    <button id="switchBtn" type="button" class="secondary">Switch to Base Sepolia</button>
+  </div>
+</header>
+
+<nav role="tablist" aria-label="Sections">
+  <button role="tab" id="tab-verify" aria-controls="verify" aria-selected="true">Verify (no wallet)</button>
+  <button role="tab" id="tab-coord" aria-controls="coord" aria-selected="false">Coordinator</button>
+  <button role="tab" id="tab-admin" aria-controls="admin" aria-selected="false">Admin</button>
+  <button role="tab" id="tab-demo" aria-controls="demo" aria-selected="false">Demo console</button>
+</nav>
+
+<main>
+  <!-- VERIFY -->
+  <section id="verify" role="tabpanel" aria-labelledby="tab-verify">
+    <h2>Verify a student's volunteer hours</h2>
+    <p>Enter the student's fake ID and secret salt. Nothing leaves this page except a lookup of the fingerprint.</p>
+    <div class="demo-buttons" aria-label="Try a demo student">
+      <span>Try demo:</span>
+      <button type="button" data-demo="S-001">VALID (S-001)</button>
+      <button type="button" data-demo="S-002">CORRECTED (S-002)</button>
+      <button type="button" data-demo="S-003">REVOKED (S-003)</button>
+      <button type="button" data-demo="S-404">NOT FOUND (S-404)</button>
+    </div>
+    <form id="verifyForm" class="grid">
+      <label>Fake student ID <input id="vId" required placeholder="S-001" autocomplete="off"></label>
+      <label>Salt (the student's secret, 0x + 64 hex) <input id="vSalt" required placeholder="0x…" autocomplete="off" spellcheck="false"></label>
+      <label>Hours the student claims (optional) <input id="vClaimed" type="number" min="0" placeholder="e.g. 5"></label>
+      <button type="submit" id="verifyBtn">Verify</button>
+    </form>
+    <div id="verifyMsg" class="msg" role="alert"></div>
+    <div id="verifyOut"></div>
+  </section>
+
+  <!-- COORDINATOR -->
+  <section id="coord" role="tabpanel" aria-labelledby="tab-coord" hidden>
+    <h2>NGO coordinator</h2>
+    <p>Needs MetaMask on Base Sepolia with a wallet the university registered.</p>
+
+    <form id="eventForm" class="card grid">
+      <h3>1. Create an event</h3>
+      <label>Event code <input id="eCode" required placeholder="EVT-002 Tree Planting (demo)"></label>
+      <label>Maximum hours (1–24) <input id="eMax" type="number" min="1" max="24" required value="6"></label>
+      <button type="submit">Create event</button>
+      <div class="msg" role="alert"></div>
+    </form>
+
+    <form id="recordForm" class="card grid">
+      <h3>2. Record hours</h3>
+      <label>Event <select id="rEvent" required><option value="">Connect your wallet to load your events</option></select></label>
+      <label>Volunteer
+        <select id="rPick">
+          <option value="">Choose…</option>
+          <option value="new">New volunteer (generate a salt)</option>
+        </select>
+      </label>
+      <label>Fake student ID <input id="rId" required placeholder="S-004" autocomplete="off"></label>
+      <label>Salt <input id="rSalt" required placeholder="0x…" autocomplete="off" spellcheck="false"></label>
+      <label>Hours <input id="rHours" type="number" min="1" required value="4"></label>
+      <button type="submit">Record hours</button>
+      <div class="msg" role="alert"></div>
+      <div id="receipt"></div>
+    </form>
+
+    <form id="correctForm" class="card grid">
+      <h3>3. Correct a record (adds a new entry)</h3>
+      <label>Record # to correct <input id="cId" type="number" min="1" required></label>
+      <label>Correct hours <input id="cHours" type="number" min="1" required></label>
+      <label>Reason code <input id="cReason" required value="TYPO_FIX" list="reasons" maxlength="31"></label>
+      <button type="submit">Append correction</button>
+      <div class="msg" role="alert"></div>
+    </form>
+
+    <form id="revokeForm" class="card grid">
+      <h3>4. Revoke a record (adds a new entry)</h3>
+      <label>Record # to revoke <input id="xId" type="number" min="1" required></label>
+      <label>Reason code <input id="xReason" required value="ATTENDANCE_VOID" list="reasons" maxlength="31"></label>
+      <button type="submit">Append revocation</button>
+      <div class="msg" role="alert"></div>
+    </form>
+    <datalist id="reasons"><option value="TYPO_FIX"><option value="ATTENDANCE_VOID"><option value="WRONG_EVENT"></datalist>
+  </section>
+
+  <!-- ADMIN -->
+  <section id="admin" role="tabpanel" aria-labelledby="tab-admin" hidden>
+    <h2>University admin</h2>
+    <p>Only the admin wallet that deployed the contract can do this.</p>
+    <form id="regForm" class="card grid">
+      <h3>Register an NGO coordinator</h3>
+      <label>Coordinator wallet address <input id="aAddr" required placeholder="0x…" spellcheck="false"></label>
+      <label>Organisation label <input id="aLabel" required placeholder="Green Shores NGO (demo)"></label>
+      <button type="submit">Register coordinator</button>
+      <div class="msg" role="alert"></div>
+    </form>
+    <form id="revForm" class="card grid">
+      <h3>Revoke a coordinator</h3>
+      <label>Coordinator wallet address <input id="aRevAddr" required placeholder="0x…" spellcheck="false"></label>
+      <button type="submit">Revoke coordinator</button>
+      <div class="msg" role="alert"></div>
+    </form>
+  </section>
+
+  <!-- DEMO -->
+  <section id="demo" role="tabpanel" aria-labelledby="tab-demo" hidden>
+    <h2>Live refusals</h2>
+    <p>Each button asks the contract to do something it must refuse. The check runs without a wallet.</p>
+    <label class="check"><input type="checkbox" id="broadcast"> Also broadcast so it appears on the explorer (sends from your connected wallet and costs a little test ETH)</label>
+    <div class="grid demo-grid">
+      <button type="button" data-refusal="wrongWallet">Wrong wallet records hours</button>
+      <button type="button" data-refusal="duplicate">Duplicate record (S-001 again)</button>
+      <button type="button" data-refusal="overHours">10 hours on a 6-hour event</button>
+      <button type="button" data-refusal="nonIssuer">Another NGO corrects record #1</button>
+    </div>
+    <div id="demoOut" class="msg" role="alert"></div>
+  </section>
+</main>
+
+<footer>
+  <span id="contractLinks"></span> · <span id="rpcInfo"></span>
+</footer>
+
+<script src="vendor/ethers.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="demo-volunteers.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
