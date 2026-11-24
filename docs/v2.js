@@ -129,6 +129,12 @@
 
   // ---------- Issuance ----------
   let myOrg = 0n;
+  async function orgEvents(c, org) {
+    if (!org) return [];
+    const n = Number(await c.ledger.eventCount());
+    // shortcut: reads every event; Stage 3's indexer replaces this with a per-NGO query
+    return (await Promise.all(Array.from({ length: n }, (_, i) => c.ledger.getFunction("getEvent")(i + 1)))).map((e, i) => [i + 1, e]).filter(([, e]) => e.orgId === org);
+  }
   async function loadIssuance() {
     const c = await available("isNotice", "isBody");
     if (!c) return;
@@ -143,9 +149,7 @@
       ctx.innerHTML = `${org.suspended ? ICON.alert : ICON.shield}<div>Coordinator for <strong>${esc(org.name)}</strong>${org.suspended ? ' <span class="badge bad">suspended</span>' : ""} · daily issuance cap ${org.dailyIssueCap}h · writes are signed by ${short(me)}.</div>`;
     }
     ctx.className = "banner " + (me && myOrg !== 0n ? "ok" : "warn");
-    const n = Number(await c.ledger.eventCount());
-    // shortcut: reads every event; Stage 3's indexer replaces this with a per-NGO query
-    const evs = (await Promise.all(Array.from({ length: n }, (_, i) => c.ledger.getFunction("getEvent")(i + 1)))).map((e, i) => [i + 1, e]).filter(([, e]) => myOrg !== 0n && e.orgId === myOrg);
+    const evs = await orgEvents(c, myOrg);
     $("v2Events").innerHTML = evs.length ? evs.map(([id, e]) => `<tr><td>#${id}</td><td>${esc(e.code)}</td><td>${CATS[Number(e.category)]}</td><td class="mono">${dateOf(e.serviceDay)}</td><td>${e.maxHours}h</td></tr>`).join("")
       : `<tr><td colspan="5" class="muted">${myOrg ? "No events yet. Create the first one." : "Connect a V2 coordinator wallet to see its events."}</td></tr>`;
     const sel = $("v2IssueEvent"), keep = sel.value;
@@ -161,7 +165,7 @@
       if (!ethers.isAddress(addr)) throw new Error(`Line ${i + 1}: "${addr}" is not a wallet address.`);
       const hours = Number(h);
       if (!Number.isInteger(hours) || hours < 1 || hours > 24) throw new Error(`Line ${i + 1}: hours must be a whole number from 1 to 24.`);
-      // shortcut: evidence is a hash of this roster line until Stage 2 attaches attendance records
+      // manual roster: evidence is a hash of the line; the Attendance page issues with real attendance evidence hashes
       return { addr: ethers.getAddress(addr), hours, evidence: ethers.id(`roster:${$("v2IssueEvent").value}:${addr.toLowerCase()}:${hours}`) };
     });
   }
@@ -187,10 +191,294 @@
   $("v1ApproveForm").onsubmit = (e) => { e.preventDefault(); send(e.target, "approveV1Link", () => [$("v1ApproveId").value, Number($("v1ApproveCat").value)], ledgerTarget).then(after(loadIssuance)); };
   $("v1SyncForm").onsubmit = (e) => { e.preventDefault(); send(e.target, "syncV1", () => [$("v1SyncId").value], ledgerTarget).then(after(loadIssuance)); };
 
+  // ---------- Attendance (off-chain service: shifts, rotating QR, approvals) ----------
+  // The service only records attendance. Hours reach the ledger when the coordinator's own wallet sends issueBatch.
+  const API = (params.get("api") || C.attendance || "").replace(/\/$/, "");
+  let session = null;
+  const fmt = (ts) => (ts ? new Date(ts * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "—");
+  const fmtT = (ts) => (ts ? new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—");
+  const fmtS = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const siteText = (v) => (v === true ? "yes" : v === false ? "no" : "not shared");
+  const STATUS = { checked_in: ["neutral", "Checked in"], checked_out: ["warn", "Awaiting approval"], approved: ["ok", "Approved, not issued"], rejected: ["bad", "Rejected"], issued: ["ok", "Issued on-chain"] };
+
+  async function api(path, { method = "GET", body, auth = true, retried = false } = {}) {
+    const headers = { "content-type": "application/json" };
+    if (auth) headers.authorization = "Bearer " + (await ensureSession()).token;
+    let r;
+    try { r = await fetch(API + path, { method, headers, body: body && JSON.stringify(body) }); }
+    catch { throw new Error(`The attendance service at ${API} is not reachable. Start it with "node server/attendance.js", then try again.`); }
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 401 && auth) {
+      session = null;
+      if (!retried) return api(path, { method, body, auth, retried: true }); // expired sign-in: sign in again once
+    }
+    if (!r.ok) throw new Error(j.error || `The attendance service answered with an error (${r.status}).`);
+    return j;
+  }
+  // One free signature (no transaction) per wallet per 2 hours.
+  async function ensureSession() {
+    const me = await currentAccount();
+    if (!me) throw new Error("Connect your wallet first.");
+    if (session && session.address.toLowerCase() === me.toLowerCase() && session.expiresAt > Date.now() / 1000 + 60) return session;
+    const { nonce, message } = await api("/auth/nonce", { method: "POST", auth: false, body: { address: me } });
+    const signature = await (await new ethers.BrowserProvider(window.ethereum).getSigner(me)).signMessage(message);
+    session = await api("/auth", { method: "POST", auth: false, body: { address: me, nonce, signature } });
+    return session;
+  }
+  const signedIn = async () => !!session && session.address.toLowerCase() === (await currentAccount())?.toLowerCase();
+  const declined = (e) => (e?.code === "ACTION_REJECTED" ? "You declined the signature in your wallet. Nothing was recorded." : e.message);
+
+  // Runs a service call from a form and shows the outcome in its status line.
+  async function act(form, fn, okHtml) {
+    const btn = form.querySelector("button[type=submit]"), msg = form.querySelector(".msg");
+    btn.disabled = true;
+    msg.className = "msg";
+    msg.textContent = (await signedIn()) ? "Working…" : "Sign the sign-in message in your wallet (free, no transaction)…";
+    try {
+      const out = await fn();
+      msg.className = "msg ok";
+      msg.innerHTML = `${ICON.check}<span>${okHtml(out)}</span>`;
+      return out;
+    } catch (e) {
+      logError("attendance", e);
+      msg.className = "msg err";
+      msg.textContent = declined(e);
+    } finally { btn.disabled = false; }
+  }
+
+  async function attendanceAvailable(noticeId, bodyId) {
+    const c = await available(noticeId, bodyId);
+    if (!c) return null;
+    if (!API) {
+      $(noticeId).innerHTML = `${ICON.info}<div><strong>The attendance service is not running for ${esc(C.netName)} yet.</strong> It runs locally for now: start it with <code>node server/attendance.js</code> and open this page with <code>?local</code>.</div>`;
+      $(noticeId).hidden = false;
+      $(bodyId).hidden = true;
+      return null;
+    }
+    return c;
+  }
+
+  // ----- Coordinator: shifts, QR, review, issuance -----
+  let shifts = [], current = null, qrTimer = null, atEvents = new Map();
+  async function loadAttendance() {
+    const c = await attendanceAvailable("atNotice", "atBody");
+    if (!c) return;
+    const me = await currentAccount(), org = me ? await c.ledger.coordinatorOrg(me) : 0n;
+    const ctx = $("atContext");
+    ctx.className = "banner " + (org ? "ok" : "warn");
+    ctx.innerHTML = !me ? `${ICON.alert}<div><strong>No wallet connected.</strong> Connect your NGO's V2 coordinator wallet.</div>`
+      : !org ? `${ICON.alert}<div><strong>${short(me)} is not a V2 coordinator.</strong> The attendance service refuses shift and approval actions from it.</div>`
+      : `${ICON.shield}<div>Coordinator for <strong>${esc((await c.ledger.getOrg(org)).name)}</strong>. Attendance service: <code>${esc(API)}</code>.</div>`;
+    const evs = await orgEvents(c, org);
+    atEvents = new Map(evs.map(([id, e]) => [id, e]));
+    const sel = $("shEvent"), keep = sel.value;
+    sel.innerHTML = evs.length ? evs.map(([id, e]) => `<option value="${id}">#${id} ${esc(e.code)} · ${dateOf(e.serviceDay)} · max ${e.maxHours}h</option>`).join("") : `<option value="">Create a V2 event first (V2 issuance page)</option>`;
+    if (keep && atEvents.has(Number(keep))) sel.value = keep;
+    if (await signedIn()) await loadShifts();
+  }
+
+  async function loadShifts() {
+    shifts = await api("/shifts");
+    $("atSignIn").textContent = "Refresh";
+    $("shiftList").innerHTML = shifts.length ? shifts.map((s) => {
+      const e = atEvents.get(s.eventId);
+      return `<li class="shift" data-shift="${s.id}" aria-current="${current?.id === s.id}"><div><strong>Shift #${s.id} · ${e ? esc(e.code) : "event #" + s.eventId}</strong><br>
+        <span>${fmt(s.start)} – ${fmtT(s.end)} · ${s.attending}/${s.capacity} attending${s.site ? " · site area set" : ""}</span></div>
+        <div class="shift-actions"><button type="button" class="btn btn-ghost sm" data-qr="in">Check-in QR</button><button type="button" class="btn btn-ghost sm" data-qr="out">Check-out QR</button><button type="button" class="btn btn-ghost sm" data-review>Review</button></div></li>`;
+    }).join("") : `<li class="muted small">No shifts yet. Create the first one.</li>`;
+  }
+
+  async function showQr(shift, kind) {
+    clearTimeout(qrTimer);
+    if ($("attend").hidden || $("qrPanel").hidden) return;
+    try {
+      const { token, rotatesAt, expiresAt, now } = await api(`/shifts/${shift.id}/qr?kind=${kind}`);
+      const link = `${location.origin}${location.pathname}${location.search}#checkin=${token}`;
+      const qr = qrcode(0, "M");
+      qr.addData(link);
+      qr.make();
+      $("qrBox").innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
+      $("qrTitle").textContent = `${kind === "in" ? "Check-in" : "Check-out"} code · shift #${shift.id}`;
+      $("qrLink").textContent = link;
+      $("qrLink").href = link;
+      $("qrLink").dataset.link = link;
+      $("qrTimer").textContent = `Next code at ${fmtS(rotatesAt)} · this one stops working at ${fmtS(expiresAt)}`;
+      // refresh 2 s before the service rotates the code, so the screen always shows a working one
+      qrTimer = setTimeout(() => showQr(shift, kind), Math.max(3000, (rotatesAt - 2 - now) * 1000)); // service clock, not this device's
+    } catch (e) {
+      $("qrTimer").textContent = declined(e);
+      qrTimer = setTimeout(() => showQr(shift, kind), 10000);
+    }
+  }
+
+  async function loadReview(shift) {
+    current = shift;
+    document.querySelectorAll("#shiftList .shift").forEach((li) => li.setAttribute("aria-current", String(Number(li.dataset.shift) === shift.id)));
+    const e = atEvents.get(shift.eventId);
+    $("atShiftName").textContent = `shift #${shift.id}${e ? " · " + e.code : ""}`;
+    const rows = await api(`/shifts/${shift.id}/attendance`);
+    $("attList").innerHTML = rows.length ? rows.map((a) => {
+      const [cls, label] = STATUS[a.status];
+      const approve = a.status === "checked_out" ? `<button type="button" class="btn btn-primary sm" data-approve="${a.id}">Approve</button>` : "";
+      const reject = ["checked_in", "checked_out"].includes(a.status) ? `<button type="button" class="btn btn-ghost sm" data-reject="${a.id}">Reject</button>` : "";
+      return `<tr data-att="${a.id}"><td>${addrHtml(a.volunteer)}</td><td class="mono">${fmtT(a.checkIn)}</td><td class="mono">${fmtT(a.checkOut)}</td>
+        <td>${siteText(a.atSiteIn)} / ${siteText(a.atSiteOut)}</td><td>${a.hours == null ? "—" : a.hours + "h"}</td>
+        <td><span class="badge ${cls}">${label}</span>${a.recordId ? ` <span class="small">record #${a.recordId}</span>` : ""}${a.reason ? ` <span class="small">${esc(a.reason)}</span>` : ""}</td>
+        <td><div class="row-actions">${approve}${reject}</div></td></tr>`;
+    }).join("") : `<tr><td colspan="7" class="muted">Nobody has checked in to this shift yet.</td></tr>`;
+  }
+
+  const localInput = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  $("shiftForm").onsubmit = (e) => {
+    e.preventDefault();
+    act(e.target, async () => {
+      const start = Math.floor(new Date($("shStart").value).getTime() / 1000), end = Math.floor(new Date($("shEnd").value).getTime() / 1000);
+      const lat = $("shLat").value, lng = $("shLng").value, radius = $("shRadius").value;
+      if ([lat, lng, radius].some(Boolean) && ![lat, lng, radius].every(Boolean)) throw new Error("For a site area, fill in latitude, longitude and radius, or leave all three empty.");
+      const s = await api("/shifts", { method: "POST", body: { eventId: Number($("shEvent").value), start, end, capacity: Number($("shCap").value), site: lat ? { lat: Number(lat), lng: Number(lng), radius: Number(radius) } : null } });
+      await loadShifts();
+      return s;
+    }, (s) => `<strong>Shift #${s.id} created.</strong> Show its check-in QR when volunteers arrive.`);
+  };
+  $("atSignIn").onclick = async () => {
+    const b = $("atSignIn");
+    b.disabled = true;
+    try { await ensureSession(); await loadShifts(); } catch (e) { toast(declined(e), "err"); } finally { b.disabled = false; }
+  };
+  $("shiftList").onclick = (e) => {
+    const b = e.target.closest("button"), li = e.target.closest("[data-shift]");
+    if (!b || !li) return;
+    const shift = shifts.find((s) => s.id === Number(li.dataset.shift));
+    if (b.dataset.qr) { $("qrPanel").hidden = false; showQr(shift, b.dataset.qr); $("qrPanel").scrollIntoView({ block: "nearest" }); }
+    else loadReview(shift).catch((err) => toast(declined(err), "err"));
+  };
+  $("qrClose").onclick = () => { clearTimeout(qrTimer); $("qrPanel").hidden = true; };
+  $("attList").onclick = async (e) => {
+    const b = e.target.closest("button[data-approve], button[data-reject]");
+    if (!b) return;
+    const msg = $("issueAttForm").querySelector(".msg");
+    b.disabled = true;
+    try {
+      const a = b.dataset.approve
+        ? await api(`/attendance/${b.dataset.approve}/approve`, { method: "POST" })
+        : await api(`/attendance/${b.dataset.reject}/reject`, { method: "POST", body: { reason: $("atReason").value } });
+      msg.className = "msg ok";
+      msg.innerHTML = `${ICON.check}<span>${a.status === "approved" ? `<strong>Approved ${a.hours}h for ${short(a.volunteer)}.</strong> Not on-chain yet: issue the approved hours below.` : `<strong>Rejected ${short(a.volunteer)}.</strong> No hours will be issued for it.`}</span>`;
+      await loadReview(current);
+    } catch (err) { msg.className = "msg err"; msg.textContent = declined(err); b.disabled = false; }
+  };
+  $("issueAttForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const form = e.target, msg = form.querySelector(".msg");
+    const stop = (t) => { msg.className = "msg err"; msg.textContent = t; };
+    if (!current) return stop("Choose a shift and review its attendance first.");
+    msg.className = "msg";
+    msg.textContent = "Checking what's approved…";
+    let iss;
+    try { iss = await api(`/shifts/${current.id}/issuable`); } catch (err) { return stop(declined(err)); }
+    if (!iss.volunteers.length) return stop("Nothing approved to issue for this shift. Approve attendance first.");
+    const receipt = await send(form, "issueBatch", () => [iss.eventId, iss.volunteers, iss.hours, iss.evidence], ledgerTarget);
+    if (!receipt) return;
+    try {
+      const { marked } = await api(`/shifts/${current.id}/issued`, { method: "POST", body: { txHash: receipt.hash } });
+      msg.insertAdjacentHTML("beforeend", `<br>The attendance service checked the receipt and marked ${marked} attendance record${marked === 1 ? "" : "s"} as issued.`);
+    } catch (err) { msg.insertAdjacentHTML("beforeend", `<br>${esc("Issued on-chain, but the attendance service could not be updated: " + err.message)}`); }
+    loadReview(current).catch(() => {});
+    loadShifts().catch(() => {});
+  };
+
+  // ----- Volunteer: check in / out from a scanned code -----
+  let ciToken = null, ciShift = null;
+  function checkinFromHash() {
+    const m = /^#checkin=([\w-]+\.(?:in|out)\.\d+\.[\w-]+)$/.exec(location.hash);
+    if (!m) return false;
+    ciToken = m[1];
+    showPage("checkin");
+    return true;
+  }
+  async function loadCheckin() {
+    const c = await attendanceAvailable("ciNotice", "ciBody");
+    if (!c) return;
+    const btn = $("ciBtn"), kind = ciToken?.split(".")[1], msg = $("ciForm").querySelector(".msg");
+    msg.className = "msg";
+    msg.textContent = "";
+    btn.hidden = true;
+    $("ciGeoRow").hidden = true;
+    if (!ciToken) {
+      $("ciTitle").textContent = "Scan a code";
+      $("ciShift").textContent = "Open this page by scanning the QR code shown at your shift.";
+    } else {
+      try {
+        ciShift = await api(`/shifts/${ciToken.split(".")[0]}`, { auth: false });
+        const e = await c.ledger.getFunction("getEvent")(ciShift.eventId);
+        $("ciTitle").textContent = kind === "in" ? "Check in" : "Check out";
+        $("ciShift").innerHTML = `<strong>${esc(e.code)}</strong><br>Shift #${ciShift.id} · ${fmt(ciShift.start)} – ${fmtT(ciShift.end)} · ${CATS[Number(e.category)]}`;
+        btn.textContent = kind === "in" ? "Check in" : "Check out";
+        btn.hidden = false;
+        $("ciGeoRow").hidden = !ciShift.site;
+      } catch (err) { $("ciShift").textContent = friendly(err); }
+    }
+    if (await signedIn()) await loadMine();
+  }
+  const metres = (a, b) => {
+    const r = Math.PI / 180, h = Math.sin(((b.lat - a.lat) * r) / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(((b.lng - a.lng) * r) / 2) ** 2;
+    return 2 * 6371000 * Math.asin(Math.sqrt(h));
+  };
+  // The position is compared on this device and discarded; only the yes/no answer leaves it.
+  const atSite = () => new Promise((resolve, reject) => navigator.geolocation
+    ? navigator.geolocation.getCurrentPosition((p) => resolve(metres({ lat: p.coords.latitude, lng: p.coords.longitude }, ciShift.site) <= ciShift.site.radius),
+      () => reject(new Error("Location was not available or not allowed. Untick the location box to continue without it.")), { timeout: 15000, maximumAge: 60000 })
+    : reject(new Error("This browser has no location support. Untick the location box to continue without it.")));
+  async function loadMine() {
+    const rows = await api("/me/attendance");
+    $("ciMineBtn").textContent = "Refresh";
+    $("ciMine").innerHTML = rows.length ? rows.map((a) => {
+      const [cls, label] = STATUS[a.status];
+      return `<li class="shift"><div><strong>Shift #${a.shiftId} · event #${a.eventId}</strong><br><span>In ${fmt(a.checkIn)} · out ${fmtT(a.checkOut)}${a.hours != null ? ` · ${a.hours}h` : ""}</span></div>
+        <span class="badge ${cls}">${label}${a.recordId ? ` · record #${a.recordId}` : ""}</span></li>`;
+    }).join("") : `<li class="muted small">No attendance yet.</li>`;
+  }
+  $("ciForm").onsubmit = (e) => {
+    e.preventDefault();
+    const kind = ciToken?.split(".")[1];
+    act(e.target, async () => {
+      const site = ciShift?.site && $("ciGeo").checked ? await atSite() : null;
+      const a = await api(kind === "in" ? "/checkin" : "/checkout", { method: "POST", body: { token: ciToken, atSite: site } });
+      ciToken = null; // the next step needs the next code
+      history.replaceState(null, "", location.pathname + location.search);
+      $("ciBtn").hidden = true;
+      $("ciGeoRow").hidden = true;
+      await loadMine();
+      return a;
+    }, (a) => kind === "in"
+      ? `<strong>Checked in at ${fmtT(a.checkIn)}.</strong> Scan the check-out code when you leave. Nothing is issued until the coordinator approves your attendance.`
+      : `<strong>Checked out at ${fmtT(a.checkOut)}.</strong> About ${a.hours}h inside the shift. Waiting for the coordinator's approval; no hours are issued yet.`);
+  };
+  $("ciMineBtn").onclick = () => loadMine().catch((e) => toast(declined(e), "err"));
+
+  // ----- Role pill (app.js): V2 roles next to V1 roles -----
+  window.v2Role = async (account) => {
+    if (!V2) return null;
+    try {
+      const c = await contracts();
+      if ((await c.ledger.runner.getCode(V2.ledger)) === "0x") return null;
+      const [org, opted] = await Promise.all([c.ledger.coordinatorOrg(account), c.ledger.optedIn(account)]);
+      return { org: org ? (await c.ledger.getOrg(org)).name : null, opted };
+    } catch (e) { console.warn("V2 role lookup failed", e); return null; }
+  };
+
+  PAGE_LOAD.attend = () => { loadAttendance().catch((e) => toast(declined(e), "err")); };
+  PAGE_LOAD.checkin = () => { loadCheckin().catch((e) => toast(declined(e), "err")); };
+  window.addEventListener("hashchange", checkinFromHash);
+  checkinFromHash();
+  if (!$("shStart").value) { const d = new Date(); d.setMinutes(0, 0, 0); $("shStart").value = localInput(d); d.setHours(d.getHours() + 3); $("shEnd").value = localInput(d); }
+
   PAGE_LOAD.passport = loadPassport;
   PAGE_LOAD.issue2 = loadIssuance;
   window.ethereum?.on?.("accountsChanged", () => {
     if (!$("passport").hidden) loadPassport();
     if (!$("issue2").hidden) loadIssuance();
+    if (!$("attend").hidden) loadAttendance();
+    if (!$("checkin").hidden) loadCheckin();
   });
 })();

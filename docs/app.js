@@ -175,7 +175,7 @@ function friendly(e) {
 const logError = (where, e) => console.error(where, { code: e?.code, shortMessage: e?.shortMessage, reason: e?.reason, method: e?.payload?.method ?? e?.info?.payload?.method, data: e?.data, infoError: e?.info?.error, walletError: e?.error, e });
 
 // ---------- Wallet + roles ----------
-let account = null, role = "none", isCoord = false, orgLabel = "", wrongNet = false, myEventCount = 0;
+let account = null, role = "none", isCoord = false, orgLabel = "", wrongNet = false, myEventCount = 0, v2 = null;
 
 // Wallet-connected contract after the network checks. V1 by default; V2 screens pass their own address/ABI.
 async function walletContract(address = C.address, abi = C.abi) {
@@ -193,7 +193,7 @@ async function walletContract(address = C.address, abi = C.abi) {
 }
 
 async function refreshRole() {
-  account = null; role = "none"; isCoord = false; orgLabel = ""; wrongNet = false;
+  account = null; role = "none"; isCoord = false; orgLabel = ""; wrongNet = false; v2 = null;
   try {
     if (window.ethereum) {
       [account] = await ethereum.request({ method: "eth_accounts" });
@@ -204,6 +204,7 @@ async function refreshRole() {
         const [admin, [active, label]] = await Promise.all([c.admin(), c.coordinators(account)]);
         [isCoord, orgLabel] = [active, label];
         role = account.toLowerCase() === admin.toLowerCase() ? "admin" : active ? "coord" : "unauth";
+        v2 = (await window.v2Role?.(account)) ?? null; // V2 roles, from v2.js (null where V2 isn't deployed)
       }
     }
   } catch (e) {
@@ -220,13 +221,16 @@ async function refreshRole() {
 
 function renderWallet() {
   const pill = $("rolePill");
-  const [text, cls] = {
+  const v2Parts = [v2?.org && "V2 COORDINATOR: " + v2.org, v2?.opted && !v2.org && "V2 VOLUNTEER"].filter(Boolean);
+  let [text, cls] = {
     admin: [isCoord ? "ADMIN · COORDINATOR: " + orgLabel : "ADMIN", "admin"],
     coord: ["COORDINATOR: " + orgLabel, "coord"],
     unauth: ["NOT AUTHORIZED", "unauth"],
     none: ["NO WALLET", ""],
     unknown: ["ROLE UNKNOWN", "unauth"],
   }[account && role === "none" ? "unknown" : role];
+  // one pill for both versions: V1 role first, then V2 roles; "NOT AUTHORIZED" only when the wallet has neither
+  if (v2Parts.length) [text, cls] = role === "unauth" ? [v2Parts.join(" · "), "coord"] : [text + " · " + v2Parts.join(" · "), cls];
   pill.textContent = text;
   pill.className = "pill " + cls;
   pill.title = text;
@@ -253,7 +257,7 @@ function renderWallet() {
   $("cOrg").textContent = isCoord ? orgLabel : "—";
   $("cWallet").textContent = account ? short(account) : "Not connected";
   $("aWallet").textContent = account ? short(account) : "Not connected";
-  $("aRole").innerHTML = `<span class="badge ${{ admin: "ok", coord: "ok", unauth: "bad", none: "neutral" }[role]}">${text}</span>`;
+  $("aRole").innerHTML = `<span class="badge ${{ admin: "ok", coord: "ok", unauth: "bad" }[cls] ?? "neutral"}">${text}</span>`;
 }
 
 async function loadMyEvents(acct) {

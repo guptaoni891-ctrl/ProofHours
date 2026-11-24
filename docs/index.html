@@ -7,7 +7,7 @@
   <meta name="description" content="ProofHours records community-service hours from accredited NGOs on a public ledger, so anyone can verify them in seconds.">
   <title>ProofHours · Verifiable volunteer records</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F4F4F5'/%3E%3Cpath d='M10 16.5l4 4 8-9' stroke='%2308090B' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=16">
+  <link rel="stylesheet" href="style.css?v=17">
 </head>
 <body data-view="landing">
 <a class="skip" href="#main">Skip to content</a>
@@ -28,6 +28,8 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>My impact</button>
     <button class="nav-item" data-page="passport">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="5"/><path d="m8.5 13.5-1.5 7 5-2.5 5 2.5-1.5-7"/></svg>My passport<span class="tag">V2</span></button>
+    <button class="nav-item" data-page="checkin">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/></svg>Shift check-in<span class="tag">V2</span></button>
     <span class="nav-label">Workspaces</span>
     <button class="nav-item" data-page="coord">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M8 2v4M16 2v4M8 11h8M8 15h5"/></svg>Coordinator</button>
@@ -35,6 +37,8 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 11.5 18 13.5l3.5-4"/></svg>Admin</button>
     <button class="nav-item" data-page="issue2">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>V2 issuance<span class="tag">V2</span></button>
+    <button class="nav-item" data-page="attend">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>Attendance<span class="tag">V2</span></button>
     <span class="nav-label">System</span>
     <button class="nav-item" data-page="demo">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Contract rules</button>
@@ -252,6 +256,76 @@
     </section>
 
     <!-- ================= V2: ISSUANCE ================= -->
+    <section id="attend" class="page" data-title="Attendance" hidden>
+      <header class="page-head"><h2>Attendance</h2><p>Run shifts with rotating QR codes for check-in and check-out. A scan or a location reading never counts on its own: you approve each attendance, then issue the approved hours on-chain from your own wallet.</p></header>
+      <div id="atNotice" class="banner warn" hidden></div>
+      <div id="atBody" class="v2-body" hidden>
+        <div id="atContext" class="banner"></div>
+        <div class="grid-2">
+          <form id="shiftForm" class="panel form-panel">
+            <div class="panel-head"><h3><span class="step">01</span>Create a shift</h3></div>
+            <label class="field"><span>V2 event</span><select id="shEvent" required><option value="">Create a V2 event first</option></select></label>
+            <div class="field-row stack-sm">
+              <label class="field"><span>Starts</span><input id="shStart" type="datetime-local" required></label>
+              <label class="field"><span>Ends</span><input id="shEnd" type="datetime-local" required></label>
+            </div>
+            <label class="field"><span>Capacity</span><input id="shCap" type="number" min="1" max="1000" value="20" required></label>
+            <fieldset class="field">
+              <legend>Site area <em>optional</em></legend>
+              <div class="field-row three">
+                <label class="field"><span>Latitude</span><input id="shLat" type="number" step="any" min="-90" max="90" placeholder="25.2048"></label>
+                <label class="field"><span>Longitude</span><input id="shLng" type="number" step="any" min="-180" max="180" placeholder="55.2708"></label>
+                <label class="field"><span>Radius (m)</span><input id="shRadius" type="number" min="20" max="5000" placeholder="200"></label>
+              </div>
+              <small>The site of a public event, never a person's home. Volunteers who agree have their phone check whether they're inside this area; only "yes" or "no" is sent.</small>
+            </fieldset>
+            <button type="submit" class="btn btn-primary">Create shift</button>
+            <div class="msg" role="alert"></div>
+          </form>
+          <div class="panel">
+            <div class="panel-head"><h3>Your NGO's shifts</h3><button type="button" id="atSignIn" class="btn btn-ghost sm">Sign in to load</button></div>
+            <ul id="shiftList" class="shift-list"><li class="muted small">Sign in to the attendance service to see your shifts.</li></ul>
+          </div>
+        </div>
+        <div id="qrPanel" class="panel qr-panel" hidden>
+          <div class="panel-head"><h3 id="qrTitle">Check-in code</h3><button type="button" id="qrClose" class="btn btn-ghost sm">Hide</button></div>
+          <div class="qr-wrap"><div id="qrBox" class="qr-box" role="img" aria-label="QR code for the shift"></div>
+            <div class="qr-side"><p id="qrHelp" class="small">Volunteers scan this with their phone camera. It changes every 30 seconds, so a photo of it stops working soon after.</p>
+              <p class="small muted">Or share the link: <a id="qrLink" href="#" class="mono qr-link"></a></p>
+              <p id="qrTimer" class="small mono" aria-live="off"></p></div></div>
+        </div>
+        <form id="issueAttForm" class="panel form-panel">
+          <div class="panel-head"><h3><span class="step">02</span>Review attendance</h3><span id="atShiftName" class="hint">choose a shift</span></div>
+          <div class="table-wrap"><table class="table"><thead><tr><th>Volunteer</th><th>In</th><th>Out</th><th>At site</th><th>Hours</th><th>Status</th><th></th></tr></thead>
+            <tbody id="attList"><tr><td colspan="7" class="muted">Choose a shift above to review its attendance.</td></tr></tbody></table></div>
+          <label class="field"><span>Reason when rejecting</span><input id="atReason" value="Not present at the shift" maxlength="100"></label>
+          <p class="small muted">Hours count whole hours inside the shift window, up to the event's maximum. Approving records evidence (times, approver, site yes/no) whose hash goes on-chain with the hours.</p>
+          <button type="submit" class="btn btn-primary">Issue approved hours on-chain</button>
+          <div class="msg" role="alert"></div>
+        </form>
+      </div>
+    </section>
+
+    <section id="checkin" class="page" data-title="Shift check-in" hidden>
+      <header class="page-head"><h2>Shift check-in</h2><p>Scan the coordinator's QR code with your phone camera to open this page. Checking in and out records your attendance. No hours are issued until the coordinator approves it.</p></header>
+      <div id="ciNotice" class="banner warn" hidden></div>
+      <div id="ciBody" class="v2-body" hidden>
+        <div class="grid-2">
+          <form id="ciForm" class="panel form-panel">
+            <div class="panel-head"><h3 id="ciTitle">Scan a code</h3></div>
+            <div id="ciShift" class="small muted">Open this page by scanning the QR code shown at your shift.</div>
+            <label class="consent-check" id="ciGeoRow" hidden><input type="checkbox" id="ciGeo"> <span>Check whether I'm at the site. Your phone compares its location with the site area; only "yes" or "no" is sent, never your coordinates.</span></label>
+            <button type="submit" id="ciBtn" class="btn btn-primary" hidden>Check in</button>
+            <div class="msg" role="alert"></div>
+          </form>
+          <div class="panel">
+            <div class="panel-head"><h3>My attendance</h3><button type="button" id="ciMineBtn" class="btn btn-ghost sm">Sign in to load</button></div>
+            <ul id="ciMine" class="shift-list"><li class="muted small">Sign in with your wallet to see your attendance and its approval status.</li></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section id="issue2" class="page" data-title="V2 issuance" hidden>
       <header class="page-head"><h2>V2 issuance</h2><p>Issue categorised hours straight to volunteers' wallets. Totals, milestones and soulbound badges update in the same transaction. Every write is checked by the contract before your wallet is asked to sign.</p></header>
       <div id="isNotice" class="banner warn" hidden></div>
@@ -545,10 +619,11 @@
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script src="vendor/ethers.umd.min.js"></script>
-<script src="config.js?v=16"></script>
-<script src="demo-volunteers.js?v=16"></script>
-<script src="app.js?v=16"></script>
-<script src="v2-abi.js?v=16"></script>
-<script src="v2.js?v=16"></script>
+<script src="config.js?v=17"></script>
+<script src="demo-volunteers.js?v=17"></script>
+<script src="app.js?v=17"></script>
+<script src="v2-abi.js?v=17"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="v2.js?v=17"></script>
 </body>
 </html>

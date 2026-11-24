@@ -166,4 +166,4 @@ async function run(base) {
   check(`V1 record count unchanged (${liveBefore})`, Number(await live.recordCount()) === liveBefore);
 }
 
-module.exports = { run };
+module.exports = { run, deployV2 };

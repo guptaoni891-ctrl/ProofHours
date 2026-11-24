@@ -688,3 +688,29 @@ textarea.mono { font-family: var(--mono); font-size: 13px; }
   .vault { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
   .inline-fields { grid-template-columns: 1fr; }
 }
+
+/* ============ 14. V2: attendance (shifts, QR, review) ============ */
+fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
+fieldset.field legend { padding: 0; margin-bottom: 6px; font-size: 12.5px; color: var(--text-2); }
+fieldset.field legend em, .field span em { font-style: normal; color: var(--text-3); }
+.field-row.three { grid-template-columns: 1fr 1fr 1fr; }
+.consent-check { display: flex; gap: var(--s3); align-items: flex-start; font-size: 13px; color: var(--text-2); cursor: pointer; }
+.consent-check input { width: 15px; height: 15px; margin-top: 2px; flex: none; accent-color: var(--accent); }
+.shift-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+.shift { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s2) var(--s3); align-items: center; padding: var(--s3); border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); font-size: 13px; }
+.shift[aria-current="true"] { border-color: var(--accent); }
+.shift strong { font-weight: 500; }
+.shift span { color: var(--text-3); font-size: 12px; }
+.shift-actions { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.shift:has(.shift-actions) { grid-template-columns: 1fr; } /* shift cards: actions under the details, so the details don't squeeze */
+.qr-wrap { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s5); align-items: center; }
+.qr-box { width: 240px; height: 240px; border-radius: var(--r); overflow: hidden; background: #fff; }
+.qr-box svg { width: 100%; height: 100%; display: block; }
+.qr-link { word-break: break-all; }
+.row-actions { display: flex; gap: var(--s2); justify-content: flex-end; }
+@media (max-width: 760px) {
+  .field-row.three { grid-template-columns: 1fr 1fr; }
+  .field-row.stack-sm { grid-template-columns: 1fr; } /* date-time inputs are too wide for two columns on phones */
+  .qr-wrap { grid-template-columns: 1fr; justify-items: center; }
+  .shift { grid-template-columns: 1fr; }
+}

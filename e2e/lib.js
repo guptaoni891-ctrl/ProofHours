@@ -90,6 +90,11 @@ function signingWallet(keys, rpcUrl, otherRpcUrl) {
       if (method === "eth_chainId" && mode === "wrongid") return "0x1";
       if (method === "wallet_switchEthereumChain" || method === "wallet_addEthereumChain") { window.__mode = "sync"; return null; }
       if (mode === "down" && (method === "eth_blockNumber" || method === "eth_getBlockByNumber")) throw Object.assign(new Error("Internal JSON-RPC error."), { code: -32603 });
+      if (method === "personal_sign") {
+        if (mode === "reject") throw Object.assign(new Error("User rejected the request."), { code: 4001 });
+        window.__signs = (window.__signs || 0) + 1;
+        return wallet().signMessage(ethers.getBytes(params[0]));
+      }
       if (method === "eth_sendTransaction") {
         if (mode === "reject") throw Object.assign(new Error("User rejected the request."), { code: 4001 });
         window.__sends++;

@@ -31,9 +31,12 @@ window.CONFIG = {
     explorers: [],
     // V2 suite deployed by script/DeployV2.s.sol from the fixed local deployer 0x…50000001 (nonces 0 and 1)
     v2: { ledger: "0xd714101097150109C3b0D8d30451280680ED44bA", badges: "0x64d4972B737C1ECfab6FEdE9AD201D28660a35F4" },
+    attendance: "http://127.0.0.1:8790", // node server/attendance.js
   },
   // V2 contracts on Base Sepolia: not deployed yet (needs explicit approval). The V2 screens say so honestly.
   v2: null,
+  // V2 attendance service (shifts, QR check-in, approvals): not hosted anywhere public yet.
+  attendance: null,
   abi: [
     "error UnauthorizedAdmin(address caller)",
     "error UnauthorizedCoordinator(address caller)",
