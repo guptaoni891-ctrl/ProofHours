@@ -1,0 +1,13 @@
+{
+  "name": "proofhours-attendance",
+  "private": true,
+  "description": "ProofHours V2 attendance service: shifts, rotating QR check-in/out, supervisor approval. Off-chain, holds no keys.",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node attendance.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ethers": "6.17.0"
+  }
+}

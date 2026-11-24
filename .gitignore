@@ -6,3 +6,4 @@ broadcast/
 screenshots/
 .claude/
 node_modules/
+server/data/
