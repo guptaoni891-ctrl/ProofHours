@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>ProofHours · Verifiable Volunteer Impact</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233B82F6'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -22,15 +22,17 @@
   <nav class="nav">
     <span class="nav-label">Platform</span>
     <button class="nav-item" data-page="overview" aria-current="page">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Overview</button>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Home</button>
     <button class="nav-item" data-page="verify">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>Verify Hours<span class="nav-tag">No wallet</span></button>
+    <button class="nav-item" data-page="impact">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>My Impact<span class="nav-tag">No wallet</span></button>
     <span class="nav-label">Portals</span>
     <button class="nav-item" data-page="coord">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg>Coordinator Portal</button>
     <button class="nav-item" data-page="admin">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Admin Portal</button>
-    <span class="nav-label">Trust</span>
+    <span class="nav-label">Audit &amp; Proof</span>
     <button class="nav-item" data-page="demo">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z"/><path d="m14.5 9.5-5 5m0-5 5 5"/></svg>Security Demo</button>
     <button class="nav-item" data-page="network">
@@ -48,7 +50,7 @@
     <button id="menuBtn" class="icon-btn menu" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
     </button>
-    <h1 id="pageTitle">Overview</h1>
+    <h1 id="pageTitle">Home</h1>
     <div class="top-actions">
       <span id="netBadge" class="net-badge"><span class="dot live" aria-hidden="true"></span><span class="net-text">Base Sepolia</span></span>
       <button id="switchBtn" data-switch type="button" class="btn btn-warn sm" hidden>Switch to <span data-net>Base Sepolia</span></button>
@@ -62,26 +64,40 @@
   <main id="main" tabindex="-1">
     <div id="netAlert" class="banner warn" role="alert" hidden></div>
     <!-- ================= OVERVIEW ================= -->
-    <section id="overview" class="page" data-title="Overview">
-      <div class="hero">
+    <section id="overview" class="page" data-title="Home">
+      <div class="hero home-hero">
         <div class="hero-copy">
           <span class="eyebrow"><span class="dot live" aria-hidden="true"></span>Live on <span data-net>Base Sepolia</span> · testnet demo</span>
           <h2>Every Hour Matters.<br><span class="grad">Every Hour Verified.</span></h2>
-          <p>University-accredited NGOs sign volunteer hours onto a public blockchain. Records can be corrected or revoked, but never silently edited or deleted. A graduation auditor checks them in seconds, with no wallet and no account.</p>
-          <div class="hero-actions">
-            <button type="button" class="btn btn-primary lg" data-goto="verify">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>Verify hours</button>
-            <button type="button" class="btn btn-ghost lg" data-goto="coord">Coordinator portal</button>
-          </div>
+          <p>Accredited NGOs sign volunteer hours onto a public blockchain. Anyone can check them in seconds, with no wallet and no account. Pick what you came to do.</p>
         </div>
-        <div class="hero-card" aria-hidden="true">
-          <div class="hc-row"><span>Student</span><code>S-002 + secret salt</code></div>
-          <div class="hc-arrow">keccak256 in your browser</div>
-          <div class="hc-row"><span>Fingerprint</span><code>0xaf59a91a…df4de2e</code></div>
-          <div class="hc-arrow">matched on-chain</div>
-          <div class="hc-verdict"><span class="vd corrected"></span>CORRECTED · 5h <small>4h original → 5h, TYPO_FIX</small></div>
-          <p class="hc-note">Example of the seeded demo record S-002</p>
-        </div>
+      </div>
+
+      <div class="roles" role="list">
+        <button type="button" class="role-card blue" data-goto="verify" role="listitem">
+          <span class="role-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></span>
+          <strong>Verify a student's hours</strong>
+          <span>For graduation auditors and employers. No wallet needed.</span>
+          <em>Start verifying →</em>
+        </button>
+        <button type="button" class="role-card green" data-goto="impact" role="listitem">
+          <span class="role-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg></span>
+          <strong>See my volunteer impact</strong>
+          <span>For volunteers. Your verified hours and next milestone, from your receipt.</span>
+          <em>Open my impact →</em>
+        </button>
+        <button type="button" class="role-card amber" data-goto="coord" role="listitem">
+          <span class="role-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg></span>
+          <strong>I'm an NGO coordinator</strong>
+          <span>Create events and record hours with your accredited wallet.</span>
+          <em>Go to coordinator portal →</em>
+        </button>
+        <button type="button" class="role-card coral" data-goto="admin" role="listitem">
+          <span class="role-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
+          <strong>I'm the university admin</strong>
+          <span>Accredit or remove NGO coordinator wallets.</span>
+          <em>Go to admin portal →</em>
+        </button>
       </div>
 
       <div class="metrics">
@@ -162,6 +178,34 @@
             <h3>Results appear here</h3>
             <p>Pick a demo student or enter an ID and salt. You'll see the verdict, the issuing NGO and the full on-chain history.</p>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= MY IMPACT ================= -->
+    <section id="impact" class="page" data-title="My Impact" hidden>
+      <p class="page-intro">Your verified volunteer hours across every accredited NGO, read live from the blockchain. Use the Student ID and secret salt from your receipt; they never leave this page.</p>
+      <form id="impactForm" class="panel impact-form" novalidate>
+        <div class="demo-chips" role="group" aria-label="Try a demo volunteer">
+          <span class="chips-label">Try a demo volunteer</span>
+          <button type="button" data-impact-demo="S-001"><span class="vd valid"></span>S-001</button>
+          <button type="button" data-impact-demo="S-002"><span class="vd corrected"></span>S-002</button>
+          <button type="button" data-impact-demo="S-003"><span class="vd revoked"></span>S-003</button>
+          <button type="button" data-impact-demo="S-404"><span class="vd notfound"></span>S-404</button>
+        </div>
+        <div class="impact-fields">
+          <label class="field"><span>Student ID</span><input id="iId" placeholder="S-001" autocomplete="off" spellcheck="false"></label>
+          <label class="field grow"><span>Secret salt <button type="button" class="tip" aria-label="What is the secret salt?" title="A random code your NGO gave you on your receipt. It turns your ID into an anonymous fingerprint, so nobody can look you up without it.">?</button></span>
+            <input id="iSalt" class="mono" placeholder="0x… (on your receipt)" autocomplete="off" spellcheck="false"></label>
+          <button type="submit" id="impactBtn" class="btn btn-primary lg">Show my impact</button>
+        </div>
+        <div id="impactMsg" class="msg err" role="alert"></div>
+      </form>
+      <div id="impactOut" aria-live="polite">
+        <div class="empty">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>
+          <h3>Your impact appears here</h3>
+          <p>Pick a demo volunteer or enter the ID and salt from your receipt to see your verified hours, your next milestone and the proof behind every hour.</p>
         </div>
       </div>
     </section>
@@ -372,8 +416,8 @@
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script src="vendor/ethers.umd.min.js"></script>
-<script src="config.js?v=6"></script>
-<script src="demo-volunteers.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="config.js?v=7"></script>
+<script src="demo-volunteers.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

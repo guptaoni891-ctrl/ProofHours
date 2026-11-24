@@ -427,6 +427,24 @@ const SKELETON = `<div class="skeleton" aria-label="Checking the blockchain">
   <div class="status-line"><span class="spinner"></span>Recomputing the fingerprint and reading the contract…</div>
   <div class="sk big"></div><div class="sk" style="width:70%"></div><div class="sk" style="width:45%"></div></div>`;
 
+// Every record for one student: its current head, full trail, event and issuing NGO. View calls only.
+async function lookupStudent(id, salt) {
+  const c = await reader();
+  const fp = fingerprint(salt, id);
+  // shortcut: first 50 events per student; page with offset if a student ever has more
+  const [ids] = await c.getRecordsByCommitment(fp, 0, 50);
+  const results = await Promise.all(ids.map(async (rid) => {
+    const [head, trailIds] = await c.getEffectiveRecord(rid);
+    const [trail, ev, org] = await Promise.all([
+      Promise.all(trailIds.map((t) => c.getRecord(t))),
+      c.events(head.eventId),
+      c.coordinators(head.issuer),
+    ]);
+    return { head, trail, ev, org };
+  }));
+  return { fp, results };
+}
+
 async function verify() {
   const id = $("vId").value.trim(), salt = $("vSalt").value.trim(), claimed = $("vClaimed").value.trim();
   const msg = $("verifyMsg"), out = $("verifyOut"), btn = $("verifyBtn");
@@ -437,19 +455,7 @@ async function verify() {
   btn.classList.add("busy");
   out.innerHTML = SKELETON;
   try {
-    const c = await reader();
-    const fp = fingerprint(salt, id);
-    // shortcut: first 50 events per student; page with offset if a student ever has more
-    const [ids] = await c.getRecordsByCommitment(fp, 0, 50);
-    const results = await Promise.all(ids.map(async (rid) => {
-      const [head, trailIds] = await c.getEffectiveRecord(rid);
-      const [trail, ev, org] = await Promise.all([
-        Promise.all(trailIds.map((t) => c.getRecord(t))),
-        c.events(head.eventId),
-        c.coordinators(head.issuer),
-      ]);
-      return { head, trail, ev, org };
-    }));
+    const { fp, results } = await lookupStudent(id, salt);
     out.innerHTML = renderVerify(id, fp, results, claimed);
     fillTxLinks(out);
   } catch (e) {
@@ -548,12 +554,93 @@ async function fillTxLinks(root, compact) {
 function loadFromHash() {
   const p = new URLSearchParams(location.hash.slice(1));
   if (!p.get("id") || !p.get("salt")) return false;
+  if (p.get("view") === "impact") {
+    $("iId").value = p.get("id");
+    $("iSalt").value = p.get("salt");
+    showPage("impact");
+    impact();
+    return true;
+  }
   $("vId").value = p.get("id");
   $("vSalt").value = p.get("salt");
   $("vClaimed").value = p.get("claimed") ?? "";
   showPage("verify");
   verify();
   return true;
+}
+
+// ---------- My Impact (volunteer dashboard) ----------
+// Milestones are computed here from on-chain hours. No badge contract exists, so nothing is "minted".
+const word = (n, one, many) => (n === 1 ? one : many);
+const MILESTONES = [
+  [5, "First Spark"], [10, "Committed"], [25, "Community Builder"], [50, "Impact Guardian"],
+  [100, "Centurion"], [250, "Changemaker"], [500, "Luminary"],
+];
+
+function milestoneHtml(total) {
+  const next = MILESTONES.find(([h]) => total < h);
+  const prev = [...MILESTONES].reverse().find(([h]) => total >= h);
+  if (!next) return `<div class="milestone done"><strong>All milestones reached: ${esc(prev[1])}</strong></div>`;
+  const pct = Math.round((total / next[0]) * 100);
+  return `<div class="milestone">
+    <div class="ms-top"><span>Next milestone: <strong>${next[1]}</strong> at ${next[0]}h</span><span class="mono">${total} / ${next[0]}h</span></div>
+    <div class="ms-bar" role="progressbar" aria-label="Progress to ${next[1]}" aria-valuemin="0" aria-valuemax="${next[0]}" aria-valuenow="${total}"><span style="--p:${pct}%"></span></div>
+    <p class="ms-note">${next[0] - total}h to go${prev ? ` · reached so far: <strong>${esc(prev[1])}</strong>` : ""}. Milestones are calculated from your on-chain hours; badges are not minted on-chain yet.</p>
+  </div>`;
+}
+
+async function impact() {
+  const id = $("iId").value.trim(), salt = $("iSalt").value.trim();
+  const msg = $("impactMsg"), out = $("impactOut"), btn = $("impactBtn");
+  msg.textContent = "";
+  if (!id) return (msg.textContent = "Enter your Student ID from your receipt.");
+  if (badSalt(salt)) return (msg.textContent = SALT_HELP + " You'll find it on your receipt.");
+  btn.disabled = true;
+  btn.classList.add("busy");
+  out.innerHTML = SKELETON;
+  try {
+    const { results } = await lookupStudent(id, salt);
+    out.innerHTML = renderImpact(id, results);
+    const n = out.querySelector("[data-count]");
+    if (n) countUp(n, Number(n.dataset.count));
+    fillTxLinks(out, true);
+  } catch (e) {
+    out.innerHTML = "";
+    msg.textContent = friendly(e);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("busy");
+  }
+}
+
+function renderImpact(id, results) {
+  if (!results.length) return `<div class="empty"><h3>No verified hours found for ${esc(id)}</h3>
+    <p>Check the Student ID and salt on your receipt. If they're right, no accredited NGO has recorded hours for you yet.</p></div>`;
+  const total = results.reduce((s, r) => s + effectiveHours(r.head), 0);
+  const ngos = new Set(results.map((r) => r.head.issuer.toLowerCase())).size;
+  const events = new Set(results.map((r) => r.head.eventId)).size;
+  const rows = results.map(({ head: h, ev, org }) => {
+    const name = verdictOf(h);
+    return `<li class="ir">
+      <span class="vd ${VERDICT[name].cls}" aria-hidden="true"></span>
+      <div class="ir-main"><strong>${esc(ev.eventCode)}</strong><span>${esc(org.orgLabel)} · ${when(h.recordedAt)}</span></div>
+      <span class="badge ${name === "VALID" ? "ok" : name === "CORRECTED" ? "warn" : "bad"}">${name}</span>
+      <strong class="ir-h">${effectiveHours(h)}h</strong>
+      <span class="ir-proof">Proof: <span data-tx="${h.id}" data-block="${h.recordedBlock}">looking up…</span></span>
+    </li>`;
+  }).join("");
+  return `<div class="impact-hero">
+      <div class="ih-total"><span>Verified hours</span><strong data-count="${total}">${total}</strong><small>for ${esc(id)}, latest entries only; revoked hours count as 0</small></div>
+      <div class="ih-stats">
+        <div><strong>${results.length}</strong><span>${word(results.length, "record", "records")}</span></div>
+        <div><strong>${ngos}</strong><span>${word(ngos, "NGO served", "NGOs served")}</span></div>
+        <div><strong>${events}</strong><span>${word(events, "event", "events")}</span></div>
+      </div>
+      ${milestoneHtml(total)}
+    </div>
+    <div class="panel"><div class="panel-head"><h3>Your verified records</h3><button type="button" class="btn btn-ghost sm" data-verify-from-impact>Open full audit view</button></div>
+      <ul class="impact-list">${rows}</ul>
+      <p class="small muted">Every row is read live from contract ${short(C.address)}. Proof links open the exact transaction on the block explorer.</p></div>`;
 }
 
 // ---------- Security demo ----------
@@ -640,6 +727,22 @@ document.addEventListener("keydown", (e) => e.key === "Escape" && setNav(false))
 
 // ---------- Wiring ----------
 $("verifyForm").onsubmit = (e) => { e.preventDefault(); verify(); };
+document.querySelectorAll("[data-impact-demo]").forEach((b) => (b.onclick = () => {
+  const v = DEMO_VOLUNTEERS.find((d) => d.id === b.dataset.impactDemo);
+  $("iId").value = v.id;
+  $("iSalt").value = v.salt;
+  impact();
+}));
+$("impactForm").onsubmit = (e) => { e.preventDefault(); impact(); };
+$("impactOut").onclick = (e) => {
+  if (!e.target.closest("[data-verify-from-impact]")) return;
+  $("vId").value = $("iId").value;
+  $("vSalt").value = $("iSalt").value;
+  $("vClaimed").value = "";
+  showPage("verify");
+  verify();
+};
+
 document.querySelectorAll("[data-demo]").forEach((b) => (b.onclick = () => {
   const v = DEMO_VOLUNTEERS.find((d) => d.id === b.dataset.demo);
   $("vId").value = v.id;
