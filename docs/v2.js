@@ -426,7 +426,7 @@
       const e = atEvents.get(s.eventId);
       return `<li class="shift" data-shift="${s.id}" aria-current="${current?.id === s.id}"><div><strong>Shift #${s.id} · ${e ? esc(e.code) : "event #" + s.eventId}</strong><br>
         <span>${fmt(s.start)} – ${fmtT(s.end)} · ${s.attending}/${s.capacity} attending${s.site ? " · site area set" : ""}</span></div>
-        <div class="shift-actions"><button type="button" class="btn btn-ghost sm" data-qr="in">Check-in QR</button><button type="button" class="btn btn-ghost sm" data-qr="out">Check-out QR</button><button type="button" class="btn btn-ghost sm" data-review>Review</button></div></li>`;
+        <div class="shift-actions"><button type="button" class="btn btn-ghost sm" data-qr="in">Check-in QR</button><button type="button" class="btn btn-ghost sm" data-qr="out">Check-out QR</button><button type="button" class="btn btn-ghost sm" data-review>Review</button><button type="button" class="btn btn-ghost sm" data-vouchers>Offline vouchers</button></div></li>`;
     }).join("") : `<li class="muted small">No shifts yet. Create the first one.</li>`;
   }
 
@@ -465,7 +465,7 @@
       const reject = ["checked_in", "checked_out"].includes(a.status) ? `<button type="button" class="btn btn-ghost sm" data-reject="${a.id}">Reject</button>` : "";
       return `<tr data-att="${a.id}"><td>${addrHtml(a.volunteer)}</td><td class="mono">${fmtT(a.checkIn)}</td><td class="mono">${fmtT(a.checkOut)}</td>
         <td>${siteText(a.atSiteIn)} / ${siteText(a.atSiteOut)}</td><td>${a.hours == null ? "—" : a.hours + "h"}</td>
-        <td><span class="badge ${cls}">${label}</span>${a.recordId ? ` <span class="small">record #${a.recordId}</span>` : ""}${a.reason ? ` <span class="small">${esc(a.reason)}</span>` : ""}</td>
+        <td><span class="badge ${cls}">${label}</span>${a.source === "voucher" ? ' <span class="badge neutral">offline voucher</span>' : ""}${a.recordId ? ` <span class="small">record #${a.recordId}</span>` : ""}${a.reason ? ` <span class="small">${esc(a.reason)}</span>` : ""}</td>
         <td><div class="row-actions">${approve}${reject}</div></td></tr>`;
     }).join("") : `<tr><td colspan="7" class="muted">Nobody has checked in to this shift yet.</td></tr>`;
   }
@@ -492,6 +492,7 @@
     if (!b || !li) return;
     const shift = shifts.find((s) => s.id === Number(li.dataset.shift));
     if (b.dataset.qr) { $("qrPanel").hidden = false; showQr(shift, b.dataset.qr); $("qrPanel").scrollIntoView({ block: "nearest" }); }
+    else if ("vouchers" in b.dataset) printVouchers(shift).catch((err) => toast(declined(err), "err"));
     else loadReview(shift).catch((err) => toast(declined(err), "err"));
   };
   $("qrClose").onclick = () => { clearTimeout(qrTimer); $("qrPanel").hidden = true; };
@@ -528,6 +529,18 @@
     loadReview(current).catch(() => {});
     loadShifts().catch(() => {});
   };
+
+  // Offline vouchers: a printable sheet of single-use codes for a shift at a site without a signal.
+  async function printVouchers(shift) {
+    const v = await api(`/shifts/${shift.id}/vouchers`, { method: "POST", body: { count: 20 } }), e = atEvents.get(shift.eventId);
+    $("transcriptView").innerHTML = `<header class="tr-head"><div><h1>Offline vouchers · shift #${shift.id}</h1><p>${e ? esc(e.code) : "event #" + shift.eventId} · ${fmt(shift.start)} – ${fmtT(shift.end)}</p>
+        <p>Hand one slip to each volunteer at the end of the shift. Each code works once, until ${fmt(v.redeemUntil)}. Redeeming it records attendance for the whole shift, which you still approve before any hours are issued.</p></div></header>
+      <ol class="voucher-sheet">${v.codes.map((c) => `<li><span>Redeem on the Shift check-in page</span><code>${c}</code></li>`).join("")}</ol>`;
+    document.body.classList.add("print-transcript");
+    $("transcriptView").hidden = false;
+    toast(`${v.codes.length} single-use vouchers created for shift #${shift.id}.`, "ok");
+    window.print();
+  }
 
   // ----- Volunteer: check in / out from a scanned code -----
   let ciToken = null, ciShift = null;
@@ -595,6 +608,11 @@
     }, (a) => kind === "in"
       ? `<strong>Checked in at ${fmtT(a.checkIn)}.</strong> Scan the check-out code when you leave. Nothing is issued until the coordinator approves your attendance.`
       : `<strong>Checked out at ${fmtT(a.checkOut)}.</strong> About ${a.hours}h inside the shift. Waiting for the coordinator's approval; no hours are issued yet.`);
+  };
+  $("voucherForm").onsubmit = (e) => {
+    e.preventDefault();
+    act(e.target, async () => { const a = await api("/vouchers/redeem", { method: "POST", body: { code: $("vcCode").value } }); $("vcCode").value = ""; await loadMine(); return a; },
+      (a) => `<strong>Voucher accepted for shift #${a.shiftId}</strong> (about ${a.hours}h). Waiting for the coordinator's approval; no hours are issued yet.`);
   };
   $("ciMineBtn").onclick = () => loadMine().catch((e) => toast(declined(e), "err"));
 

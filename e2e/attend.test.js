@@ -159,6 +159,40 @@ async function run(base) {
       check(`${label} page at 375px: still showing its content, no sideways scrolling`, (await p.$eval(page, (e) => !e.hidden && e.querySelector(".v2-body:not([hidden]) .shift"))) && !(await L.overflow(p)));
     }
     await L.shot(vp, "v2-checkin-mobile");
+    group("Offline vouchers (no signal at the site)");
+    clock += 5 * 3600 * 1000; // later that day, after the first shift's check-out (voucher shifts can't overlap it)
+    await (await d.ledger.connect(coord.connect(provider)).createEvent("EVT-302 Wadi Cleanup (demo)", 0, 12, today)).wait();
+    await cp.setViewport({ width: 1366, height: 900 });
+    await cp.bringToFront();
+    await nav(cp, "attend", 3000);
+    await cp.evaluate((s, e) => {
+      const local = (ms) => new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      document.querySelector("#shEvent").value = "2";
+      document.querySelector("#shStart").value = local(s);
+      document.querySelector("#shEnd").value = local(e);
+      ["shLat", "shLng", "shRadius"].forEach((id) => (document.getElementById(id).value = ""));
+    }, clock - 4 * 3600000, clock - 3600000);
+    m = await submit(cp, "shiftForm");
+    check("past shift #2 created for the second event", /Shift #2 created/.test(m), m);
+    await cp.evaluate(() => { window.print = () => { window.__printed = (window.__printed || 0) + 1; }; });
+    await click(cp, '[data-shift="2"] [data-vouchers]');
+    await sleep(1500);
+    const codes = await cp.$$eval("#transcriptView .voucher-sheet code", (c) => c.map((x) => x.textContent));
+    check("20 single-use voucher codes printed", codes.length === 20 && codes.every((c) => /^PH-2-[0-9A-F]{8}-[0-9A-F]{10}$/.test(c)) && (await cp.evaluate(() => window.__printed)) === 1, codes[0]);
+    await cp.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+    await vp.setViewport({ width: 1366, height: 900 });
+    await vp.bringToFront();
+    await nav(vp, "checkin", 2500);
+    await vp.$eval("#vcCode", (i, c) => (i.value = c.toLowerCase()), codes[0]);
+    m = await submit(vp, "voucherForm");
+    check("volunteer redeems a code (typed in lower case) → pending approval, no hours yet", /Voucher accepted for shift #2[\s\S]*about 3h[\s\S]*no hours are issued yet/.test(m), m);
+    await vp.$eval("#vcCode", (i, c) => (i.value = c), codes[0]);
+    m = await submit(vp, "voucherForm");
+    check("the same code can't be used twice", /already been used/.test(m), m);
+    await cp.bringToFront();
+    await nav(cp, "attend", 3000);
+    await click(cp, '[data-shift="2"] [data-review]');
+    check("coordinator sees it marked 'offline voucher', 3h, awaiting approval", await waitText(cp, "#attList", /Awaiting approval[\s\S]*offline voucher/), await txt(cp, "#attList"));
     check("no JavaScript errors", cp.__errors.length + vp.__errors.length === 0, [...cp.__errors, ...vp.__errors].join("; "));
   } finally {
     await b?.close();

@@ -9,6 +9,7 @@
   },
   "devDependencies": {
     "ethers": "6.17.0",
-    "puppeteer-core": "24.43.1"
+    "puppeteer-core": "24.43.1",
+    "axe-core": "4.14.1"
   }
 }
