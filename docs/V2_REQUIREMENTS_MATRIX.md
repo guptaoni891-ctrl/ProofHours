@@ -1,0 +1,231 @@
+# ProofHours V2: requirements traceability matrix
+
+Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Product requirements come from §5 (feature catalogue M1–M12), §6 (dashboard and verifier), §7 (gamification), §8 (blockchain, SBT, privacy), §9 (search, UX, accessibility), §11 (architecture) and §12 (security and governance).
+
+**Statuses:**
+- **Not Started**
+- **In Progress:** part of the requirement is built.
+- **Implemented:** code exists.
+- **Tested:** automated tests pass.
+- **Blocked:** needs something outside engineering, such as approval, an account, a partner or legal review.
+
+**"Local chain":** verified on an isolated Anvil fork of Base Sepolia. Nothing in V2 is deployed to a public network yet.
+
+**Stage numbers** refer to [V2_IMPLEMENTATION_ROADMAP.md](V2_IMPLEMENTATION_ROADMAP.md). **Test IDs** refer to [V2_TEST_MATRIX.md](V2_TEST_MATRIX.md).
+
+**Reuse key:**
+- **V1** = `VolunteerHours` + current site.
+- **L** = `ProofHoursLedger`.
+- **B** = `ProofHoursBadges`.
+- **FE** = `docs/` front end.
+
+## Not product requirements (tracked, not built)
+
+| Plan section | Content | Treatment |
+|---|---|---|
+| §1–2 | Problem research, statistics, root-cause analysis, hypotheses H1–H5 | Context only. H1–H5 need field pilots, not code. |
+| §3 | 25-question discovery interview map | Research instrument; no software. |
+| §4 | Stakeholder and empathy maps | Informs roles in §12; no software. |
+| §10 | Cost-to-solve and unit economics | Estimates; never shown as product data. |
+| §13 | Self-review, pitch and hackathon plan | Strategy; its build order informs the roadmap. |
+| Part I | Master prompt for another AI | Not applicable. |
+
+## M1: Gamified volunteer command hub
+
+| ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M1.1 | Impact XP and hero strip: verified lifetime hours, civic level, streak with freeze shields, badge count | P1 | V1 My Impact; L totals | Passport hero: total hours ✓, badge count via vault ✓; level, XP and streak to add | Streak and level computed from indexed records | L `totalHours`, `categoryHours` ✓ | Record timestamps | M11 indexer (streaks) | E2E-V2 passport total ✓; streak unit tests (todo) | In Progress |
+| M1.2 | Next-milestone quest bar, exact hours to the next automated mint | P1 | V1 My Impact bar | Passport total milestone bar and per-area bars ✓ | none | B thresholds ✓ | none | none | E2E-L My Impact 50%, E2E-V2 milestone ✓ | Tested |
+| M1.3 | Active mission and shift feed matched by category, distance, skills | P1 | none | Feed on the hub | Opportunities API, matching | none | Shift DB, user preferences | M2, M5 | Feed shows only open, real shifts | Not Started |
+| M1.4 | Badge unlock vault: real SBTs, art, mint tx, share | P1 | none | Trophy Vault reads real tokens and on-chain art ✓; unlock animation and share to add | none | B `tokenOfKey`, `tokenURI` ✓ | none | M8.2 for sharing | E2E-V2 vault shows 2 minted badges, no fake ones ✓ | In Progress |
+| M1.5 | Wallet-linked volunteer identity | P1 | none | Passport tied to the connected wallet ✓ | Smart-account and passkey adapters (Stage 6) | L `optIn` ✓, V1 linking ✓ | none | none | F-V2 opt-in tests ✓, E2E-V2 ✓ | In Progress |
+| M1.6 | Impact Companion avatar grows with verified hours (§7, App. A #1) | P1 | none | Avatar from verified totals, arcade only | none | none | none | M1.1 | Grows only from verified hours | Not Started |
+| M1.7 | Loading, empty and error states | P1 | Design system | Every V2 screen has honest empty, loading and not-deployed states ✓ | none | none | none | none | E2E-V2 "not deployed on Base Sepolia" ✓ | Tested |
+
+## M2: Proof-of-service and attendance
+
+| ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M2.1 | Rotating HMAC-QR check-in/out (~90 s), single-use nonce, replay protection | P1 | none | Coordinator QR screen; volunteer scanner (PWA) | HMAC token service, nonce store, server-side validation | none | Shift session keys (env) | Stage 3 backend | Replayed or expired token rejected; screenshot of an old QR fails | Not Started |
+| M2.2 | Optional geofence: on-device Haversine, store only a boolean, explicit consent | P1 | none | Consent prompt, on-device check | Store `withinGeofence` only | none | Event coordinates | M2.1 | No raw GPS stored; refusal path works | Not Started |
+| M2.3 | Supervisor quick-approve queue, approved duration, batch sign | P1 | L `issueBatch` ✓ | Pending queue, approve/reject | Attendance DB, duration calculation | L `issueBatch` ✓ | Check-in/out logs | M2.1 | A QR or GPS reading alone never issues hours; approval required | In Progress (contract batch ✓) |
+| M2.4 | Double check-in and overlapping-shift prevention | P1 | L daily cap ✓ | Clear refusal messages | Overlap detection on timestamps | L 12h/day cap ✓ | Shift times | M2.1 | Overlap rejected; cap enforced ✓ | In Progress |
+| M2.5 | Offline paper-to-chain voucher (QR/SMS scratch codes, Merkle root) | P2 | none | Redeem screen | Voucher signing, Merkle batches | Optional Merkle redemption | SMS gateway (vendor) | Stage 6 | Voucher single-use, tamper-evident | Not Started |
+| M2.6 | Attendance audit trail | P1 | L events ✓ | none | Append-only attendance log | `evidenceHash` field ✓ | none | M2.1 | Every issued hour links to evidence | In Progress |
+
+## M3: Volunteer Impact 360 and public passport
+
+| ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M3.1 | Shareable public passport: lifetime hours by area, issuers, SBTs | P1 | Passport ✓ | Public read-only `?passport=0x…` view; currently shows the connected wallet only | Optional profile handle (opt-in) | L, B views ✓ | none | M9.3 consent | Third party sees only what the volunteer published | In Progress |
+| M3.2 | Dual-mode toggle: Arcade and Verifier Clean | P1 | V1 print report ✓ | Clean institutional mode | none | none | none | none | Same data in both modes | In Progress (print view only) |
+| M3.3 | One-click proof drawer: issuer, timestamp, explorer link, status | P1 | V1 verify evidence ✓ | V2 per-record drawer with tx link | Indexer supplies tx hashes | L events ✓ | none | M11 | Every hour and badge links to its tx | In Progress |
+| M3.4 | Endorsements and skill graph co-signed by supervisors | P2 | none | Skill tags | Signed endorsements | Optional | OB3 skill assertions | M8.2 | Endorsement verifies to the NGO signer | Not Started |
+| M3.5 | Correction and revocation history | P1 | V1 trail ✓; L chain ✓ | Passport shows latest entry and reason ✓; full trail view to add | none | L `supersededBy` / `replacesId` ✓ | none | none | Corrections update totals ✓ (F-V2) | In Progress |
+| M3.6 | PDF and structured-data exports | P2 | none | Export buttons | PDF and JSON-LD generator | none | none | M10, M8.2 | Export matches on-chain state | Not Started |
+
+## M4: Gamification, quests and leagues
+
+| ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M4.1 | Skill trees: Environmental, Education, Healthcare, Emergency, Inclusion; tiers 10/50/100/250/500 | P1 | B category badges ✓ | Tree visual per area | none | B category milestones ✓ | none | none | Category badges minted at each tier ✓ (F-V2) | In Progress |
+| M4.2 | 30-person opt-in cohort leagues, seasonal resets, fair grouping, private opt-out | P1 | none | League panel (hidden in verifier mode) | League service on rolling 30-day verified hours | none | Opt-in flag | M11, M9.3 | Non-opted-in users never ranked | Not Started |
+| M4.3 | Near-me rival strip (3 above, 3 below) | P1 | none | Strip | From league data | none | none | M4.2 | Never shows full lists | Not Started |
+| M4.4 | Co-op guild and campus quests; collective milestone art | P1 | none | Quest panel | Guild membership, aggregates | Optional group SBT | none | M11 | Only verified member hours count | Not Started |
+| M4.5 | Impact Twin factual equivalents, clearly labelled estimates | P1 | none | Fun-fact card | Benchmark rates (configurable, sourced) | none | Independent Sector rate | none | Always labelled "estimate", never a payment | Not Started |
+| M4.6 | Streak Freeze shields | P1 | none | Streak UI | Streak rules | none | none | M1.1 | Freeze rules deterministic | Not Started |
+| M4.7 | Unsung Hero cosmetic drops (surprise, arcade only) | P1 | none | Profile frames | Eligibility from shift metadata | none | none | M2 | Cosmetic only, no hours | Not Started |
+| M4.8 | Anti-hour-farming: 12h/day cap with emergency override, Polymath prestige, supervisor-signed upper tiers | P1 | none | Refusal messages ✓ | Polymath calculation | L `DAILY_CAP`, `EMERGENCY_DAILY_CAP` ✓, per-NGO cap ✓ | none | M3.4 (upper tiers) | Cap enforced in contract ✓ (F-V2, E2E-V2) | In Progress |
+| M4.9 | Competition optional; gamification can't be advanced with fabricated hours | P1 | none | Opt-in toggles | none | Totals only from NGO issuance or approved V1 imports ✓ | none | none | No self-reported path exists ✓ (F-V2) | In Progress |
+
+## M5: Search and discovery
+
+| ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M5.1 | Global Cmd/Ctrl+K omni-search: opportunities, verified NGOs, opted-in volunteers, badges, credentials; typo-tolerant; <50 ms target | P1 | none | Command palette | Meilisearch index plus sync from indexer | none | Meilisearch (self-hosted, Docker) | M11 | Benchmarked p50/p95 latency reported; private identities never indexed | Not Started |
+| M5.2 | Facets: impact area, SDG, verified-hours slider, city/remote, accessibility, EN/AR | P1 | none | Filter pills | Facet schema | none | Opportunity schema | M5.1 | Facet counts correct | Not Started |
+| M5.3 | Paste-to-verify resolver: wallet, handle, badge id or URL, with non-revocation check | P1 | V1 verify by ID + salt ✓ | Resolver input | Optional | B `ownerOf` / `locked` ✓ | none | M5.1 | Revoked or burned badge shows as such | In Progress |
+| M5.4 | Hybrid semantic skill matching (opt-in talent) | P2 | none | NL query | Meilisearch hybrid / embeddings | none | Embedding model | M5.1, M9.3 | Only opted-in profiles | Not Started |
+
+## M6: NGO operations cockpit
+
+| ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M6.1 | Batch hour issuance with automatic SBT mint | P1 | none | V2 issuance roster (multi-line = one batch) ✓ | none | L `issueBatch` ✓, auto mint ✓ | none | none | All-or-nothing batch ✓ (F-V2); E2E-V2 issuance ✓ | Tested |
+| M6.2 | Event management with category and service date | P1 | V1 events | V2 event form ✓ | none | L `createEvent` ✓ | none | none | E2E-V2 create event ✓ | Tested |
+| M6.3 | Shift scheduling, roster, QR management, approval queue | P1 | none | Cockpit screens | Shift DB | none | none | M2 | Shift lifecycle tests | Not Started |
+| M6.4 | Transaction previews and explicit progress | P1 | V1 pre-check ✓ | Dry-run before the wallet opens, receipt summaries ✓ | none | none | none | none | E2E-V2 refusals before signing ✓ | Tested |
+| M6.5 | Gas sponsorship (paymaster) | P1 | none | Gasless send | Paymaster integration | Selector allowlist | Pimlico / Coinbase paymaster (vendor) | Stage 6 | Spend caps enforced | Blocked (vendor account) |
+| M6.6 | Grant and Form 990 report pack | P2 | none | Export | Report generator | none | none | M10 | Values labelled estimates | Not Started |
+| M6.7 | Corporate "Dollars for Doers" eligibility packet | P2 | none | Claim packet | Employer directory | none | Grant directory (vendor) | M10 | Never claims a grant is earned | Blocked (directory data, legal) |
+| M6.8 | NGO activity and performance reporting | P2 | none | Dashboard | Aggregates | none | none | M11 | Matches chain | Not Started |
+| M6.9 | Strict NGO-specific permissions | P1 | none | none | none | L org scoping ✓ | none | none | Other NGO can't issue, correct or revoke ✓ (F-V2) | Tested |
+
+## M7: Auditor and compliance console
+
+| ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M7.1 | Anomaly radar: >12h/day, overlapping shifts, issuance spikes, large one-time issuance; alerts are allegations | P1 | L caps ✓ (preventive) | Console with a quarantine queue | Rule engine over indexed data | none | none | M11 | Alert never auto-penalises; review required | Not Started |
+| M7.2 | Random 2–5% spot-audit sampling, evidence queue | P2 | none | Queue | Sampler, evidence links | none | none | M2, M11 | Sample reproducible | Not Started |
+| M7.3 | Disputes, NGO suspension and credential revocation proposals, multisig approval | P2 | none | Dispute workflow | Case records | L `suspendOrg` (auditor) ✓, governance-only `reinstateOrg` / `unpause` / revoke ✓ | Safe multisig | M12.2 | Auditor can't reinstate or unpause ✓ (F-V2) | In Progress |
+| M7.4 | Dedicated auditor role | P1 | none | Console access | none | L `AUDITOR_ROLE` ✓ | none | none | F-V2 ✓ | Implemented |
+| M7.5 | Break-glass access log with typed justification (App. A #29) | P2 | none | Justification prompt | Immutable access log | none | none | M9 | Every restricted view logged | Not Started |
+
+## M8: Soulbound token system
+
+| ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M8.1 | Milestone auto-mint: totals 10/25/50/100/250/500, categories 10/50/100/250/500, ERC-5192 locked, ERC-165 ids, no transfer path, duplicate prevention | P1 | none | Trophy Vault ✓ | none | B ✓ | none | none | F-V2: interfaces, every transfer path reverts, 500h mints all, invariant: badge ⇔ eligibility ✓ | Tested (local chain); Base Sepolia deployment Blocked (approval) |
+| M8.2 | Correction and revocation lifecycle: burn when hours fall below, re-mint on re-cross | P1 | none | Vault updates ✓ | none | B `_reconcile` ✓ | none | none | F-V2, E2E-V2 burn after correction ✓ | Tested (local chain) |
+| M8.3 | ERC-5484 consensual: `burnAuth` = Both, consent before mint, holder renounce/reclaim | P1 | none | Renounce UI to add | none | B `burnAuth`, `renounce`, `reclaim`; L `optIn` ✓ | none | none | F-V2 renounce/reclaim ✓ | In Progress (UI) |
+| M8.4 | Dynamic evolving badge artwork | P1 | none | Vault renders on-chain SVG ✓ | none | B on-chain JSON + SVG (tier ring) ✓ | none | none | F-V2 `tokenURI` decodes ✓ | Tested |
+| M8.5 | Pinned immutable assets (IPFS) | P1 | none | none | IPFS adapter | none | Pinata or self-hosted IPFS | Stage 3 | CID stable | Not Started (on-chain art covers current badges) |
+| M8.6 | Open Badges 3.0 / W3C VC 2.0 credential generation and validation, Status List, LinkedIn sharing | P2 | none | Export and share | Issuer key (KMS) / DID, signer, status list | none | 1EdTech validator | Stage 5 | OB3 validates; revocation reflected | Not Started |
+
+## M9: Risk, privacy and regulatory tools
+
+| ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M9.1 | NGO KYB and charity-registry gate before issuer role | P2 | L `registerOrg` (governance) ✓ | Verification workflow | Registry adapters | none | CharityAPI, Candid, Sumsub, CDA/IACAD | Stage 5 | Unverified NGO can't get issuer rights | Blocked (vendor accounts, legal) |
+| M9.2 | Encrypted off-chain identity vault, erasure (crypto-shredding), unlinking | P2 | none | Account settings | Encrypted Postgres, per-user keys (KMS) | none | KMS | Stage 5 | After erasure, PII unrecoverable; chain holds none | Not Started |
+| M9.3 | Consent and selective disclosure: Public / Link-only / Private per category | P2 | L opt-in ✓ | Disclosure matrix | Profile visibility | none | none | M3.1 | Private data never served | In Progress |
+| M9.4 | Data retention, restricted access, auditor access logs, key management | P2 | none | none | Policies, logs | none | KMS | M9.2 | Tests per policy | Not Started |
+| M9.5 | No personal data on-chain | P1 | V1 commitments ✓ | none | none | L stores only addresses, hours, hashes ✓ | none | none | Code review ✓; see security model | Implemented |
+
+Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a DPIA, which are **Blocked (legal)**.
+
+## M10: Reports, transcripts and CSR
+
+| ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M10.1 | University co-curricular transcript: PDF with QR and verification reference (CLR 2.0) | P2 | V1 print report ✓ | Transcript view | PDF generator | none | none | M11 | QR resolves to live verification | In Progress (V1 print only) |
+| M10.2 | NGO, ESG and CSR impact packs by category, period and NGO | P2 | none | Reports | Aggregates | none | none | M11 | Totals match chain | Not Started |
+| M10.3 | Benchmark civic-value figures, always labelled estimates | P2 | none | Labels | Configurable rates | none | none | none | Never presented as money earned | Not Started |
+| M10.4 | Exportable audit evidence | P2 | none | Export | Evidence bundles | none | none | M7 | Bundle hashes verify | Not Started |
+
+## M11: Data and indexing
+
+| ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M11.1 | Event indexer with reorg handling and confirmation depth | P1 | V1 view reads | none | Indexer service (TypeScript) | L/B events ✓ | Postgres | Stage 3 | Reorg replay test; reindex from genesis | Not Started |
+| M11.2 | Durable storage and backend APIs | P1 | none | API client | REST API | none | Postgres (Docker) | Stage 3 | API contract tests | Not Started |
+| M11.3 | Search synchronisation | P1 | none | none | Indexer → Meilisearch | none | Meilisearch | M5 | Index reflects chain within N blocks | Not Started |
+| M11.4 | EAS integration where justified | P1 | none | none | Attestation writer | EAS schema resolver | EAS on Base | Stage 3 | Decision recorded (ledger already holds the attestations) | Not Started (to evaluate) |
+| M11.5 | Content-addressed storage adapter | P1 | none | none | IPFS adapter | none | IPFS | Stage 3 | CID round trip | Not Started |
+| M11.6 | Blockchain truth separate from cached views | P1 | FE reads chain directly ✓ | "From cache" labels | Cache marked derived | none | none | M11.1 | UI distinguishes cached data | In Progress |
+| M11.7 | V1 read-only compatibility | P1 | V1 ✓ | V1 screens unchanged ✓ | none | L reads V1 via interface ✓ | none | none | E2E-L 91/91, F-V2 V1 migration ✓ | Tested |
+
+## M12: Governance and administration
+
+| ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| M12.1 | RBAC: volunteer, coordinator, NGO admin, auditor, governance | P1 | V1 admin/coordinator | Admin screens for V2 orgs to add | none | L roles ✓ | none | none | F-V2 permission tests ✓ | In Progress (UI) |
+| M12.2 | Multisig governance (Safe 3-of-5) with timelock | P1 | none | none | none | Governance handover in the deploy script ✓; timelock to add | Safe | Approval | Admin role held by the multisig on deploy | Blocked (multisig signers, approval) |
+| M12.3 | Coordinator can never grant itself admin or auditor | P1 | none | none | none | Coordinators hold no AccessControl role ✓ | none | none | F-V2 ✓ | Tested |
+| M12.4 | Emergency pause; issuance limits; issuer suspension | P1 | none | Status shown in issuance context ✓ | none | L `pause` / `unpause`, org daily cap, `suspendOrg` ✓ | none | none | F-V2 ✓ | Tested |
+| M12.5 | Paymaster spend limits and selector allowlist | P1 | none | none | Paymaster policy | none | Paymaster vendor | M6.5 | Disallowed selector refused | Blocked (vendor) |
+| M12.6 | Security monitoring, audit logging, configuration management | P1 | none | none | Monitors, alerts | Events ✓ | none | M11 | Alert fires on test anomaly | Not Started |
+| M12.7 | Protected upgrade and versioning | P1 | none | none | none | Contracts are immutable; new versions deploy side by side (V1 untouched) ✓ | none | none | Documented in the deployment plan | Implemented |
+
+## §6 Dashboard, §7 gamification, §9 UX: cross-cutting requirements
+
+| ID | Requirement | Pri | Status |
+|---|---|---|---|
+| X6.1 | Eight tiles: verified hours ✓, badges ✓, primary pillar, civic value (estimate), streak, league tier (hidden in verifier mode), NGOs served, integrity status | P1 | In Progress (2 of 8) |
+| X6.2 | Drill-down proof drawer from any tile, badge or log | P1 | In Progress (V1 verify) |
+| X6.3 | Presets: Volunteer Arcade, Institutional Verifier, NGO Coordinator, Auditor Forensic | P1 | Not Started |
+| X6.4 | Deliberately excluded: tradable NFTs, global all-time leaderboards, unverified hours in totals, strobing animation | P1 | Implemented (none exist; badges are soulbound) |
+| X7.1 | No monetary or tradable rewards | P1 | Implemented |
+| X7.2 | Endowed progress (start partway to "First Spark") | P1 | Not Started |
+| X9.1 | WCAG 2.2 AA contrast, 24×24 px targets (44 px on touch), visible focus | P1 | In Progress (tokens ≥ 4.5:1, focus rings ✓; a full axe audit is outstanding) |
+| X9.2 | `prefers-reduced-motion` | P1 | Implemented |
+| X9.3 | English / Arabic with RTL from day one | P1 | Not Started (Stage 6) |
+| X9.4 | Mobile PWA for QR scanning | P1 | Not Started (Stage 2/6) |
+| X9.5 | High-contrast mode | P1 | Not Started |
+| X12.1 | Roles see/cannot table (§12) enforced at the right trust boundary | P1 | In Progress (contract roles ✓; backend roles in Stage 3) |
+| X12.2 | No on-platform donations (fundraising firewall) | P1 | Implemented (no payment code exists) |
+
+## Appendix A: idea bank (evaluated separately, not validated requirements)
+
+| # | Idea | Overlaps | Candidate stage | Status |
+|---|---|---|---|---|
+| 1 | Impact Companion avatar | M1.6 | 4 | Not Started |
+| 2 | Co-op campus / guild boss quests | M4.4 | 4 | Not Started |
+| 3 | 30-person tiered leagues | M4.2 | 4 | Not Started |
+| 4 | Civic Receipt share card (labelled estimate) | M4.5 | 4 | Not Started |
+| 5 | Streak Freeze shields | M4.6 | 4 | Not Started |
+| 6 | Unsung Hero drops | M4.7 | 4 | Not Started |
+| 7 | Polymath all-rounder badge | M4.8 | 4 (needs a contract tier) | Not Started |
+| 8 | Near-me rival strip | M4.3 | 4 | Not Started |
+| 9 | Rotating 90 s HMAC-QR gate | M2.1 | 2 | Not Started |
+| 10 | Geofence boolean proof | M2.2 | 2 | Not Started |
+| 11 | Anomaly radar | M7.1 | 5 | Not Started |
+| 12 | Peer-vouched micro-checkpoints | M2 | 6 | Not Started |
+| 13 | Offline scratch-card / SMS voucher | M2.5 | 6 | Not Started |
+| 14 | Emergency-response fast-track | M4.8 | later | Not Started |
+| 15 | Sub-50 ms omni-search | M5.1 | 3 | Not Started |
+| 16 | Paste-to-verify resolver | M5.3 | 3 | In Progress |
+| 17 | SDG and inclusion filter matrix | M5.2 | 3 | Not Started |
+| 18 | NL recruiter talent finder | M5.4 | later | Not Started |
+| 19 | City impact heatmap (district-level, anonymised) | none | later | Not Started |
+| 20 | Dollars-for-Doers auto-matcher | M6.7 | 5 | Blocked |
+| 21 | Board / Form 990 ROI deck | M6.6 | 5 | Not Started |
+| 22 | Volunteers.ae and LMS export adapter | M10 | 5 | Blocked (partner formats) |
+| 23 | Returning-volunteer retention radar | none | later | Not Started |
+| 24 | No-show predictor and waitlist | none | later | Not Started |
+| 25 | Arcade ⇄ Verifier Clean skin switch | M3.2 | 5 | In Progress |
+| 26 | Category cloaking and selective disclosure | M9.3 | 5 | Not Started |
+| 27 | One-click erasure (crypto-shredding) | M9.2 | 5 | Not Started |
+| 28 | ERC-5484 burn and guardian recovery | M8.3, wallet recovery | 6 | In Progress (burn ✓) |
+| 29 | Break-glass auditor access log | M7.5 | 5 | Not Started |
+| 30 | Public NGO trust scorecard | M7 | 5 | Not Started |
+| 31 | LinkedIn Open Badges 3.0 push | M8.6 | 5 | Not Started |
+| 32 | Co-curricular transcript (CLR 2.0) | M10.1 | 5 | In Progress |
+| 33 | Supervisor micro-endorsements | M3.4 | 5 | Not Started |
+| 34 | Course-credit milestone tracker | M10 | later | Not Started |
+| 35 | Alumni lifelong continuity (wallet migration) | wallet recovery | 6 | Not Started |
+| 36 | Hypercerts bridge | none | later | Not Started |
+| 37 | UNV GIVE telemetry feed (anonymised) | M10 | later | Not Started |
+| 38 | Cross-border humanitarian passport | M3 | later | Not Started |
+| 39 | Civic perks via ZK proof (non-monetary) | none | later | Not Started |
+| 40 | Embeddable verifier web component | M5.3 | 3 | Not Started |
