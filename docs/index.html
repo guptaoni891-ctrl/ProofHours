@@ -7,7 +7,7 @@
   <meta name="description" content="ProofHours records community-service hours from accredited NGOs on a public ledger, so anyone can verify them in seconds.">
   <title>ProofHours · Verifiable volunteer records</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F4F4F5'/%3E%3Cpath d='M10 16.5l4 4 8-9' stroke='%2308090B' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=17">
+  <link rel="stylesheet" href="style.css?v=18">
 </head>
 <body data-view="landing">
 <a class="skip" href="#main">Skip to content</a>
@@ -24,6 +24,8 @@
     <span class="nav-label">Public</span>
     <button class="nav-item" data-page="verify">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 3 8.4 7 10 4-1.6 7-5.5 7-10V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>Verify a record</button>
+    <button class="nav-item" data-page="opps">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M8 14h3"/></svg>Opportunities<span class="tag">V2</span></button>
     <button class="nav-item" data-page="impact">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>My impact</button>
     <button class="nav-item" data-page="passport">
@@ -60,6 +62,7 @@
     </button>
     <h1 id="pageTitle">Home</h1>
     <div class="top-actions">
+      <button id="searchBtn" type="button" class="btn btn-ghost sm search-btn" aria-keyshortcuts="Control+K Meta+K"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search</span><kbd>Ctrl K</kbd></button>
       <span id="netBadge" class="net-badge"><span class="dot live" aria-hidden="true"></span><span class="net-text">Base Sepolia</span></span>
       <button id="switchBtn" data-switch type="button" class="btn btn-warn sm" hidden>Switch to <span data-net>Base Sepolia</span></button>
       <span id="rolePill" class="pill" role="status">NO WALLET</span>
@@ -229,6 +232,7 @@
       <header class="page-head"><h2>My passport</h2><p>Your wallet-linked record: verified hours by impact area, the soulbound badges they have earned on-chain, and every entry behind them. Hours only come from accredited NGOs; nothing here can be self-reported.</p></header>
       <div id="ppNotice" class="banner warn" hidden></div>
       <div id="ppBody" class="v2-body" hidden>
+        <div id="ppPublic" class="banner" hidden></div>
         <form id="ppOptForm" class="banner consent" novalidate>
           <div id="ppConsent" class="consent-text"></div>
           <button type="submit" class="btn btn-primary sm">Opt in</button>
@@ -256,6 +260,22 @@
     </section>
 
     <!-- ================= V2: ISSUANCE ================= -->
+    <section id="opps" class="page" data-title="Opportunities" hidden>
+      <header class="page-head"><h2>Opportunities</h2><p>Upcoming shifts run by accredited NGOs. Turn up, scan the coordinator's QR code to check in, and your hours are issued once the NGO approves your attendance.</p></header>
+      <div id="opNotice" class="banner warn" hidden></div>
+      <div id="opBody" class="v2-body" hidden>
+        <div class="op-filters">
+          <div id="opCats" class="facets" role="group" aria-label="Impact area"></div>
+          <div class="op-controls">
+            <label class="field op-org"><span>NGO</span><select id="opOrg"><option value="">All NGOs</option></select></label>
+            <label class="check"><input type="checkbox" id="opOpen"> Only shifts with spots left</label>
+            <button type="button" id="opEvent" class="facet on" hidden></button>
+          </div>
+        </div>
+        <ul id="opList" class="op-list" aria-live="polite"><li class="muted small">Loading…</li></ul>
+      </div>
+    </section>
+
     <section id="attend" class="page" data-title="Attendance" hidden>
       <header class="page-head"><h2>Attendance</h2><p>Run shifts with rotating QR codes for check-in and check-out. A scan or a location reading never counts on its own: you approve each attendance, then issue the approved hours on-chain from your own wallet.</p></header>
       <div id="atNotice" class="banner warn" hidden></div>
@@ -618,12 +638,19 @@
 
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
+<dialog id="omni" class="omni" aria-label="Search ProofHours">
+  <div class="omni-input"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="omniQ" type="text" autocomplete="off" spellcheck="false" aria-label="Search NGOs and events, or paste a wallet, transaction, record or verification link" placeholder="Search NGOs and events, or paste a wallet, tx, record # or link"><kbd>Esc</kbd></div>
+  <div id="omniFacets" class="facets omni-facets" role="group" aria-label="Impact area"></div>
+  <div id="omniResults" class="omni-results"></div>
+  <div id="omniFoot" class="omni-foot"></div>
+</dialog>
+
 <script src="vendor/ethers.umd.min.js"></script>
-<script src="config.js?v=17"></script>
-<script src="demo-volunteers.js?v=17"></script>
-<script src="app.js?v=17"></script>
-<script src="v2-abi.js?v=17"></script>
+<script src="config.js?v=18"></script>
+<script src="demo-volunteers.js?v=18"></script>
+<script src="app.js?v=18"></script>
+<script src="v2-abi.js?v=18"></script>
 <script src="vendor/qrcode.js"></script>
-<script src="v2.js?v=17"></script>
+<script src="v2.js?v=18"></script>
 </body>
 </html>

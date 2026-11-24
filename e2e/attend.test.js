@@ -151,7 +151,7 @@ async function run(base) {
     await click(vp, "#ciMineBtn");
     check("volunteer's own list: 'Issued on-chain · record #1'", await waitText(vp, "#ciMine", /Issued on-chain · record #1/), await txt(vp, "#ciMine"));
     await L.shot(vp, "v2-checkin-volunteer");
-    for (const [p, label] of [[vp, "check-in"], [cp, "attendance"]]) {
+    for (const [p, label] of [[cp, "attendance"], [vp, "check-in"]]) { // vp last: the screenshot below needs it in front
       await p.bringToFront();
       await p.setViewport({ width: 375, height: 812 }); // width only: toggling isMobile would reload and lose the page state
       await sleep(600);

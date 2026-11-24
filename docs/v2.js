@@ -60,11 +60,21 @@
   const nextOf = (hours, ladder) => ladder.find((t) => hours < t);
 
   // ---------- Passport ----------
+  // viewAddr: someone else's public passport (#passport=0x…). Everything shown is public on-chain data.
+  let viewAddr = null;
   async function loadPassport() {
     const c = await available("ppNotice", "ppBody");
     if (!c) return;
-    const me = await currentAccount();
+    const mine = await currentAccount();
+    const me = viewAddr ?? mine, pub = !!viewAddr && viewAddr.toLowerCase() !== mine?.toLowerCase();
     const consent = $("ppConsent"), optForm = $("ppOptForm");
+    $("ppPublic").hidden = !pub;
+    $("pageTitle").textContent = document.querySelector("#passport .page-head h2").textContent = pub ? "Public passport" : "My passport";
+    $("v1LinkForm").hidden = pub;
+    if (pub) {
+      $("ppPublic").innerHTML = `${ICON.info}<div><strong>Public passport of <code>${viewAddr}</code>.</strong> Everything here is public on-chain data anyone can read. <button type="button" class="btn btn-ghost sm" id="ppMine">View my own passport</button></div>`;
+      $("ppMine").onclick = () => { viewAddr = null; history.replaceState(null, "", location.pathname + location.search); loadPassport(); };
+    }
     if (!me) {
       consent.innerHTML = `${ICON.info}<span><strong>Connect your wallet</strong> to see its passport. Your passport is tied to the wallet you volunteer with.</span>`;
       optForm.querySelector("button").hidden = true;
@@ -74,8 +84,10 @@
       return;
     }
     const [opted, total, cats] = await Promise.all([c.ledger.optedIn(me), c.ledger.totalHours(me), c.ledger.categoryHours(me)]);
-    optForm.querySelector("button").hidden = opted;
-    consent.innerHTML = opted
+    optForm.querySelector("button").hidden = opted || pub;
+    consent.innerHTML = pub
+      ? (opted ? `${ICON.shield}<span><strong>Opted in.</strong> This wallet accepts verified hours from accredited NGOs.</span>` : `${ICON.info}<span><strong>Not opted in.</strong> NGOs can't issue hours to this wallet yet.</span>`)
+      : opted
       ? `${ICON.shield}<span><strong>Receiving hours.</strong> Accredited NGOs can issue verified hours to ${short(me)}. Badges are minted to this wallet automatically.</span>`
       : `${ICON.info}<span><strong>Opt in to receive hours.</strong> NGOs can only issue hours to wallets that agreed to it. This also consents to badges being minted to this wallet; you can renounce any badge later.</span>`;
     optForm.classList.toggle("ok", opted);
@@ -389,12 +401,12 @@
 
   // ----- Volunteer: check in / out from a scanned code -----
   let ciToken = null, ciShift = null;
-  function checkinFromHash() {
+  function v2FromHash() {
     const m = /^#checkin=([\w-]+\.(?:in|out)\.\d+\.[\w-]+)$/.exec(location.hash);
-    if (!m) return false;
-    ciToken = m[1];
-    showPage("checkin");
-    return true;
+    const pp = /^#passport=(0x[0-9a-fA-F]{40})$/.exec(location.hash);
+    if (m) { ciToken = m[1]; showPage("checkin"); }
+    else if (pp) { viewAddr = ethers.getAddress(pp[1]); $("passport").hidden ? showPage("passport") : loadPassport(); }
+    return !!(m || pp);
   }
   async function loadCheckin() {
     const c = await attendanceAvailable("ciNotice", "ciBody");
@@ -456,6 +468,157 @@
   };
   $("ciMineBtn").onclick = () => loadMine().catch((e) => toast(declined(e), "err"));
 
+  // ---------- Discovery: Cmd/Ctrl+K search, paste-to-verify resolver, opportunities directory ----------
+  // Text search goes to the indexer (public NGO and event data only). Pasted wallets, transactions, record and badge
+  // numbers and verification links are resolved straight from the chain, so they work without any service.
+  const IDX = (params.get("search") || C.indexer || "").replace(/\/$/, "");
+  const omni = $("omni"), omniQ = $("omniQ");
+  let omniSeq = 0, omniCat = "", omniTimer = null;
+
+  const openPassport = (addr) => { location.hash = "passport=" + ethers.getAddress(addr); };
+  const goOpps = (filter) => { opFilter = { ...opFilter, ...filter }; showPage("opps"); };
+
+  // Pasted things → what they are, read from the chain. Each item: { title, detail (html), go? }
+  async function resolvePaste(raw) {
+    const s = raw.trim();
+    try {
+      const u = new URL(s);
+      const h = new URLSearchParams(u.hash.slice(1));
+      if (h.get("checkin")) return [{ title: "Shift check-in code", detail: "Opens the check-in page for that shift.", go: () => { location.hash = u.hash; } }];
+      if (h.get("passport")) return resolvePaste(h.get("passport"));
+      if (h.get("id") && h.get("salt")) return [{ title: `V1 verification link · student ${esc(h.get("id"))}`, detail: "Checks the record and its full history on the ledger.", go: () => { location.hash = u.hash; } }];
+      return [];
+    } catch { /* not a URL */ }
+    if (ethers.isAddress(s)) {
+      const parts = [], a = ethers.getAddress(s);
+      const [active, label] = await (await reader()).coordinators(a).catch(() => [false, ""]);
+      if (label) parts.push(`V1 coordinator "${esc(label)}"${active ? "" : " (revoked)"}`);
+      const c = V2 && (await contracts().catch(() => null));
+      if (c && (await c.ledger.runner.getCode(V2.ledger)) !== "0x") {
+        const [org, opted, total, badgeCount] = await Promise.all([c.ledger.coordinatorOrg(a), c.ledger.optedIn(a), c.ledger.totalHours(a), c.badges.balanceOf(a)]);
+        if (org) parts.push(`V2 coordinator for ${esc((await c.ledger.getOrg(org)).name)}`);
+        parts.push(`${total}h verified in V2 · ${badgeCount} soulbound badge${badgeCount === 1n ? "" : "s"}${opted ? "" : " · not opted in"}`);
+      }
+      return [{ title: `Wallet ${short(a)}`, detail: parts.join(" · ") || "No ProofHours activity found.", go: V2 ? () => openPassport(a) : null, cta: "Open public passport" }];
+    }
+    if (/^0x[0-9a-fA-F]{64}$/.test(s)) {
+      const r = await (await reader()).runner.getTransactionReceipt(s);
+      if (!r) return [{ title: "Transaction not found", detail: `No transaction with this hash on ${esc(C.netName)}.` }];
+      return [{ title: `Transaction ${short(s)} · ${r.status === 1 ? "succeeded" : "failed"} in block ${r.blockNumber}`, detail: `${esc(summarize(r) || "No ProofHours events in this transaction.")}${C.explorers.length ? " · " + links("tx/" + s) : ""}` }];
+    }
+    const rec = /^(?:v2\s*)?record\s*#?\s*(\d+)$|^#(\d+)$/i.exec(s), badge = /^badge\s*#?\s*(\d+)$/i.exec(s);
+    if ((rec || badge) && V2) {
+      const c = await contracts();
+      if (rec) {
+        const id = BigInt(rec[1] ?? rec[2]);
+        if (id < 1n || id > (await c.ledger.recordCount())) return [{ title: `V2 record #${id}`, detail: "No such record on this chain." }];
+        const h = await c.ledger.headOf(id), t = Number(h.entryType);
+        const status = t === 2 ? "Revoked" : t === 1 ? `Corrected (now #${h.id})` : t === 3 ? "Imported from V1" : "Valid";
+        return [{ title: `V2 record #${id} · ${status}`, detail: `${t === 2 ? 0 : h.hoursLogged}h ${CATS[Number(h.category)]} for ${short(h.volunteer)} · ${esc((await c.ledger.getOrg(h.orgId)).name)}`, go: () => openPassport(h.volunteer), cta: "Open passport" }];
+      }
+      const id = BigInt(badge[1]);
+      const owner = await c.badges.ownerOf(id).catch(() => null);
+      if (!owner) return [{ title: `Badge #${id} · not held`, detail: "This badge was never minted or has been burned (its milestone no longer holds, or the holder renounced it)." }];
+      const json = JSON.parse(atob((await c.badges.tokenURI(id)).split(",")[1]));
+      return [{ title: `Badge #${id} · ${esc(json.name)}`, detail: `Held by ${short(owner)} · soulbound (locked: ${await c.badges.locked(id)})`, go: () => openPassport(owner), cta: "Open passport" }];
+    }
+    return null; // not a paste: run a text search
+  }
+
+  function renderOmni(items, foot) {
+    $("omniResults").innerHTML = items.length ? items.map((it, i) => it.go
+      ? `<button type="button" class="omni-item" data-i="${i}"><span class="omni-kind">${it.kind ?? "Result"}</span><strong>${it.title}</strong><span class="omni-detail">${it.detail}</span><span class="omni-cta">${it.cta ?? "Open"} →</span></button>`
+      : `<div class="omni-item static"><span class="omni-kind">${it.kind ?? "Result"}</span><strong>${it.title}</strong><span class="omni-detail">${it.detail}</span></div>`).join("")
+      : `<p class="omni-empty">${foot.empty ?? "No matches."}</p>`;
+    $("omniResults").onclick = (e) => { const b = e.target.closest("button.omni-item"); if (b) { omni.close(); items[Number(b.dataset.i)].go(); } };
+    $("omniFoot").innerHTML = foot.text ?? "";
+  }
+
+  async function runOmni() {
+    const q = omniQ.value, seq = ++omniSeq;
+    try {
+      const pasted = q.trim() ? await resolvePaste(q) : null;
+      if (seq !== omniSeq) return;
+      if (pasted) { $("omniFacets").innerHTML = ""; return renderOmni(pasted.map((p) => ({ kind: "On-chain", ...p })), { text: "Read live from the chain, not from the search index." }); }
+      if (!IDX) { $("omniFacets").innerHTML = ""; return renderOmni([], { empty: `Text search isn't running for ${esc(C.netName)} yet. You can still paste a wallet address, transaction hash, "record 12", "badge 3" or a verification link.` }); }
+      const t0 = performance.now();
+      const r = await fetch(`${IDX}/search?q=${encodeURIComponent(q)}&category=${omniCat}&limit=12`).then((x) => x.json());
+      if (seq !== omniSeq) return;
+      const total = Object.values(r.facets.category).reduce((a, b) => a + b, 0);
+      $("omniFacets").innerHTML = [`<button type="button" class="facet${omniCat === "" ? " on" : ""}" data-cat="">All events <em>${total}</em></button>`,
+        ...CATS.map((name, i) => r.facets.category[i] ? `<button type="button" class="facet c${i}${omniCat === String(i) ? " on" : ""}" data-cat="${i}">${name} <em>${r.facets.category[i]}</em></button>` : "")].join("");
+      renderOmni(r.results.map((x) => x.kind === "org"
+        ? { kind: "NGO", title: esc(x.title), detail: esc(x.detail), cta: "See its shifts", go: () => goOpps({ org: String(x.id), event: null }) }
+        : { kind: CATS[x.category] ?? "Event", title: esc(x.title), detail: `Event #${x.id} · ${esc(x.detail)}`, cta: "See shifts", go: () => goOpps({ event: x.id, org: "" }) }),
+        { text: `${r.results.length} result${r.results.length === 1 ? "" : "s"} · search ${r.tookMs} ms · round trip ${Math.round(performance.now() - t0)} ms · public NGO and event data only; volunteers are never searchable`, empty: q.trim() ? "No NGOs or events match." : "No NGOs or events indexed yet." });
+    } catch (e) {
+      if (seq !== omniSeq) return;
+      logError("search", e);
+      renderOmni([], { empty: e instanceof TypeError ? `The search service at ${esc(IDX)} is not reachable. Start it with <code>node server/indexer.js</code>.` : esc(friendly(e)) });
+    }
+  }
+  const openOmni = () => { if (!omni.open) { omni.showModal(); omniQ.select(); runOmni(); } };
+  omniQ.oninput = () => { clearTimeout(omniTimer); omniTimer = setTimeout(runOmni, 120); };
+  $("omniFacets").onclick = (e) => { const b = e.target.closest("[data-cat]"); if (b) { omniCat = b.dataset.cat; runOmni(); omniQ.focus(); } };
+  omni.addEventListener("keydown", (e) => {
+    const items = [...omni.querySelectorAll("button.omni-item")], i = items.indexOf(document.activeElement);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1 + (i < 0 ? 1 : 0))) % items.length]?.focus(); }
+    else if (e.key === "Enter" && document.activeElement === omniQ) { e.preventDefault(); items[0]?.click(); }
+  });
+  omni.addEventListener("click", (e) => { if (e.target === omni) omni.close(); }); // backdrop click
+  $("searchBtn").onclick = openOmni;
+  document.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); omni.open ? omni.close() : openOmni(); } });
+
+  // ----- Opportunities directory -----
+  let opFilter = { cat: "", org: "", open: false, event: null }, opCache = null;
+  const evMeta = new Map(), orgMeta = new Map();
+  async function loadOpps() {
+    const c = await available("opNotice", "opBody");
+    if (!c) return;
+    if (!API) {
+      $("opNotice").innerHTML = `${ICON.info}<div><strong>No shift directory for ${esc(C.netName)} yet.</strong> Shifts come from the attendance service, which runs locally for now (<code>node server/attendance.js</code>, then open this page with <code>?local</code>).</div>`;
+      $("opNotice").hidden = false;
+      $("opBody").hidden = true;
+      return;
+    }
+    const shifts = await api("/opportunities", { auth: false });
+    const ids = [...new Set(shifts.map((s) => s.eventId))].filter((id) => !evMeta.has(id));
+    await Promise.all(ids.map(async (id) => evMeta.set(id, await c.ledger.getFunction("getEvent")(id))));
+    // events never change, so they're cached; NGOs are re-read each time because they can be suspended
+    const orgIds = [...new Set(shifts.map((s) => evMeta.get(s.eventId).orgId))];
+    await Promise.all(orgIds.map(async (id) => orgMeta.set(id, await c.ledger.getOrg(id))));
+    // shifts of suspended NGOs are left out: they can't issue hours
+    opCache = shifts.map((s) => ({ ...s, ev: evMeta.get(s.eventId), org: orgMeta.get(evMeta.get(s.eventId).orgId) })).filter((s) => !s.org.suspended);
+    const orgs = [...new Map(opCache.map((s) => [String(s.ev.orgId), s.org.name])).entries()];
+    $("opOrg").innerHTML = `<option value="">All NGOs</option>` + orgs.map(([id, name]) => `<option value="${id}">${esc(name)}</option>`).join("");
+    renderOpps();
+  }
+  function renderOpps() {
+    if (!opCache) return;
+    const f = opFilter;
+    $("opOrg").value = f.org;
+    $("opOpen").checked = f.open;
+    const base = opCache.filter((s) => (!f.org || String(s.ev.orgId) === f.org) && (!f.open || s.attending < s.capacity) && (!f.event || s.eventId === f.event));
+    const shown = base.filter((s) => f.cat === "" || String(s.ev.category) === f.cat);
+    const count = (i) => base.filter((s) => Number(s.ev.category) === i).length;
+    $("opCats").innerHTML = [`<button type="button" class="facet${f.cat === "" ? " on" : ""}" data-cat="">All areas <em>${base.length}</em></button>`,
+      ...CATS.map((name, i) => `<button type="button" class="facet c${i}${f.cat === String(i) ? " on" : ""}" data-cat="${i}" ${count(i) ? "" : "disabled"}>${name} <em>${count(i)}</em></button>`)].join("");
+    const ev = f.event && evMeta.get(f.event);
+    $("opEvent").hidden = !ev;
+    if (ev) $("opEvent").innerHTML = `Event: ${esc(ev.code)} <span aria-hidden="true">×</span>`;
+    $("opList").innerHTML = shown.length ? shown.map((s) => {
+      const left = s.capacity - s.attending, hrs = Math.round(((s.end - s.start) / 3600) * 10) / 10;
+      return `<li class="op c${Number(s.ev.category)}"><div class="op-main"><span class="op-cat">${CATS[Number(s.ev.category)]}</span><strong>${esc(s.ev.code)}</strong>
+        <span>${esc(s.org.name)} · up to ${s.ev.maxHours} verified hours</span></div>
+        <div class="op-when"><strong>${fmt(s.start)}</strong><span>until ${fmtT(s.end)} · ${hrs}h shift</span></div>
+        <div class="op-spots"><span class="badge ${left > 0 ? "ok" : "neutral"}">${left > 0 ? `${left} of ${s.capacity} spots left` : "Full"}</span>${s.site ? '<span class="small muted">optional location check</span>' : ""}</div></li>`;
+    }).join("") : `<li class="muted small">${opCache.length ? "No shifts match these filters." : "No upcoming shifts right now. NGOs publish shifts from their Attendance page."}</li>`;
+  }
+  $("opCats").onclick = (e) => { const b = e.target.closest("[data-cat]"); if (b) { opFilter.cat = b.dataset.cat; renderOpps(); } };
+  $("opOrg").onchange = () => { opFilter.org = $("opOrg").value; renderOpps(); };
+  $("opOpen").onchange = () => { opFilter.open = $("opOpen").checked; renderOpps(); };
+  $("opEvent").onclick = () => { opFilter.event = null; renderOpps(); };
+
   // ----- Role pill (app.js): V2 roles next to V1 roles -----
   window.v2Role = async (account) => {
     if (!V2) return null;
@@ -469,8 +632,11 @@
 
   PAGE_LOAD.attend = () => { loadAttendance().catch((e) => toast(declined(e), "err")); };
   PAGE_LOAD.checkin = () => { loadCheckin().catch((e) => toast(declined(e), "err")); };
-  window.addEventListener("hashchange", checkinFromHash);
-  checkinFromHash();
+  PAGE_LOAD.opps = () => { loadOpps().catch((e) => { logError("opportunities", e); $("opList").innerHTML = `<li class="msg err">${esc(declined(e))}</li>`; }); };
+  window.addEventListener("hashchange", v2FromHash);
+  v2FromHash();
+  // the sidebar's "My passport" always means your own wallet
+  document.querySelector('.nav-item[data-page="passport"]').addEventListener("click", () => { if (viewAddr) { viewAddr = null; history.replaceState(null, "", location.pathname + location.search); loadPassport(); } });
   if (!$("shStart").value) { const d = new Date(); d.setMinutes(0, 0, 0); $("shStart").value = localInput(d); d.setHours(d.getHours() + 3); $("shEnd").value = localInput(d); }
 
   PAGE_LOAD.passport = loadPassport;
