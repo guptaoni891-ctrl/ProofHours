@@ -38,7 +38,7 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 | M1.2 | Next-milestone quest bar, exact hours to the next automated mint | P1 | V1 My Impact bar | Passport total milestone bar and per-area bars ✓ | none | B thresholds ✓ | none | none | E2E-L My Impact 50%, E2E-V2 milestone ✓ | Tested |
 | M1.3 | Active mission and shift feed matched by category, distance, skills | P1 | none | Opportunities page: upcoming shifts with area facets, NGO filter, spots left ✓ | Attendance service `GET /opportunities` (public, no attendee data) ✓ | none | Shift DB | M2, M5 | Feed shows only open, real shifts ✓ (ended shifts and suspended NGOs left out; E2E-DISC); distance and skills matching not built | In Progress |
 | M1.4 | Badge unlock vault: real SBTs, art, mint tx, share | P1 | none | Real tokens and on-chain art ✓; unlock animation once per badge per browser (off with reduced motion) ✓; "Copy public link" ✓ | none | B `tokenOfKey`, `tokenURI` ✓ | none | M8.2 | E2E-GAME: 5 badges animate on first view only ✓. Mint-transaction link not shown (needs the indexer to track badge mints) | In Progress |
-| M1.5 | Wallet-linked volunteer identity | P1 | none | Passport tied to the connected wallet ✓ | Smart-account and passkey adapters (Stage 6) | L `optIn` ✓, V1 linking ✓ | none | none | F-V2 opt-in tests ✓, E2E-V2 ✓ | In Progress |
+| M1.5 | Wallet-linked volunteer identity | P1 | none | Passport tied to the connected wallet ✓ | Smart-account and passkey wallets work unchanged (contracts only use `msg.sender`); embedded-wallet adapters **Blocked** (vendor accounts: Privy, thirdweb, Coinbase); wallet recovery **deferred** (needs a guardian/passkey decision, designed in architecture §3) | L `optIn` ✓, V1 linking ✓ | none | none | F-V2 opt-in tests ✓, E2E-V2 ✓ | In Progress |
 | M1.6 | Impact Companion avatar grows with verified hours (§7, App. A #1) | P1 | none | Five-stage plant (Seed → Grove keeper) by civic level, Arcade view only ✓ | none | none | none | M1.1 | Grows only from verified hours ✓ (S-PROG, E2E-GAME) | Tested (local) |
 | M1.7 | Loading, empty and error states | P1 | Design system | Every V2 screen has honest empty, loading and not-deployed states ✓ | none | none | none | none | E2E-V2 "not deployed on Base Sepolia" ✓ | Tested |
 
@@ -50,7 +50,7 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 | M2.2 | Optional geofence: on-device Haversine, store only a boolean, explicit consent | P1 | none | Unticked consent box; Haversine on the device; only yes/no sent ✓ | Stores `in_site`/`out_site` as 1/0/null; non-booleans stored as null; coordinates never accepted ✓ | none | Site area per shift (public event site) | M2.1 | No coordinates stored ✓; refusal path (untick) ✓; client-reported, so informational only | Tested (local) |
 | M2.3 | Supervisor quick-approve queue, approved duration, batch sign | P1 | L `issueBatch` ✓ | Review table with Approve/Reject; "Issue approved hours on-chain" sends one `issueBatch` from the coordinator's wallet ✓ | Whole hours inside the shift window, capped at the event maximum; evidence JSON (salted) + keccak256 hash; receipt verified before marking issued ✓ | L `issueBatch` ✓ | Check-in/out logs (SQLite) | M2.1 | QR + location alone issue nothing ✓; approval by the NGO's coordinator only ✓; on-chain evidence hash = attendance evidence ✓ (S-ATT, E2E-ATT) | Tested (local) |
 | M2.4 | Double check-in and overlapping-shift prevention | P1 | L daily cap ✓ | Clear refusal messages ✓ | No check-in while checked in elsewhere; one attendance per wallet per shift and per event ✓ | L 12h/day cap ✓ | Shift times | M2.1 | Overlap and double check-in rejected ✓; cap enforced ✓ | Tested (local) |
-| M2.5 | Offline paper-to-chain voucher (QR/SMS scratch codes, Merkle root) | P2 | none | Redeem screen | Voucher signing, Merkle batches | Optional Merkle redemption | SMS gateway (vendor) | Stage 6 | Voucher single-use, tamper-evident | Not Started |
+| M2.5 | Offline paper-to-chain voucher (QR/SMS scratch codes, Merkle root) | P2 | Attendance service | Coordinator prints 20 single-use codes per shift; volunteer redeems on the check-in page ✓ | HMAC codes (hex, case-insensitive), single use, 7-day window, consent, overlap and capacity checks; redeemed attendance still needs approval; evidence records `source: voucher` ✓ | Merkle redemption not built (approval + issueBatch already put it on-chain) | SMS gateway **Blocked** (vendor) | none | Forged, reused, expired and overlapping codes refused ✓ (S-ATT, E2E-ATT) | Tested (local; SMS Blocked) |
 | M2.6 | Attendance audit trail | P1 | L events ✓ | Volunteer sees own attendance and status ✓ | Attendance rows keep times, site flags, decision, approver, evidence, record id and tx hash ✓ | `evidenceHash` field ✓ | none | M2.1 | Every attendance-issued hour links to its evidence ✓; append-only history log not yet (rows are updated in place) | In Progress |
 
 ## M3: Volunteer Impact 360 and public passport
@@ -164,7 +164,7 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 | M12.3 | Coordinator can never grant itself admin or auditor | P1 | none | none | none | Coordinators hold no AccessControl role ✓ | none | none | F-V2 ✓ | Tested |
 | M12.4 | Emergency pause; issuance limits; issuer suspension | P1 | none | Status shown in issuance context ✓ | none | L `pause` / `unpause`, org daily cap, `suspendOrg` ✓ | none | none | F-V2 ✓ | Tested |
 | M12.5 | Paymaster spend limits and selector allowlist | P1 | none | none | Paymaster policy | none | Paymaster vendor | M6.5 | Disallowed selector refused | Blocked (vendor) |
-| M12.6 | Security monitoring, audit logging, configuration management | P1 | none | none | Monitors, alerts | Events ✓ | none | M11 | Alert fires on test anomaly | Not Started |
+| M12.6 | Security monitoring, audit logging, configuration management | P1 | none | none | `/health` and `/metrics` (requests, status codes, rate-limited count, p50/p95/p99) on both services; JSON access logs without query strings or tokens; per-client rate limits with `Retry-After`; CSP on the site; runbooks with alert thresholds ✓ | Events ✓ | none | M11 | Rate limit and metrics tested ✓ (S-ATT); alert routing to a pager not set up (no hosting yet) | In Progress |
 | M12.7 | Protected upgrade and versioning | P1 | none | none | none | Contracts are immutable; new versions deploy side by side (V1 untouched) ✓ | none | none | Documented in the deployment plan | Implemented |
 
 ## §6 Dashboard, §7 gamification, §9 UX: cross-cutting requirements
@@ -177,9 +177,9 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 | X6.4 | Deliberately excluded: tradable NFTs, global all-time leaderboards, unverified hours in totals, strobing animation | P1 | Implemented (none exist; badges are soulbound) |
 | X7.1 | No monetary or tradable rewards | P1 | Implemented |
 | X7.2 | Endowed progress (start partway to "First Spark") | P1 | Tested (local): First Spark quest where opting in is a real first step (1 of 3 done), so no fabricated progress |
-| X9.1 | WCAG 2.2 AA contrast, 24×24 px targets (44 px on touch), visible focus | P1 | In Progress (tokens ≥ 4.5:1, focus rings ✓; a full axe audit is outstanding) |
+| X9.1 | WCAG 2.2 AA contrast, 24×24 px targets (44 px on touch), visible focus | P1 | Tested (automated): axe-core WCAG 2.0/2.1/2.2 A+AA on all 14 pages at 1366 and 375 px, V2 screens with real data, search dialog and Arabic RTL: 0 violations after fixes; skip link, focus rings, Ctrl+K/Esc, reduced motion checked (E2E-A11Y). **Not done:** manual audit with screen readers (NVDA/VoiceOver) by an accessibility specialist |
 | X9.2 | `prefers-reduced-motion` | P1 | Implemented |
-| X9.3 | English / Arabic with RTL from day one | P1 | Not Started (Stage 6) |
+| X9.3 | English / Arabic with RTL from day one | P1 | In Progress: language switch (remembered), `lang`/`dir`, layout mirrored through CSS logical properties; app shell, page titles and the Verify page in Arabic; other screens still English. Translations need native-speaker review (E2E-A11Y) |
 | X9.4 | Mobile PWA for QR scanning | P1 | In Progress (the phone's own camera opens the check-in link, and the page has no sideways scrolling at 375 px ✓; installable PWA and offline queue in Stage 6) |
 | X9.5 | High-contrast mode | P1 | Not Started |
 | X12.1 | Roles see/cannot table (§12) enforced at the right trust boundary | P1 | In Progress (contract roles ✓; attendance service checks roles against the chain ✓; indexer/API roles in Stage 3) |
@@ -201,7 +201,7 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 | 10 | Geofence boolean proof | M2.2 | 2 | Tested (local) |
 | 11 | Anomaly radar | M7.1 | 5 | Tested (local) |
 | 12 | Peer-vouched micro-checkpoints | M2 | 6 | Not Started |
-| 13 | Offline scratch-card / SMS voucher | M2.5 | 6 | Not Started |
+| 13 | Offline scratch-card / SMS voucher | M2.5 | 6 | Tested (local paper vouchers; SMS Blocked) |
 | 14 | Emergency-response fast-track | M4.8 | later | Not Started |
 | 15 | Sub-50 ms omni-search | M5.1 | 3 | Tested (local benchmark: p95 38 ms at 100,000 events) |
 | 16 | Paste-to-verify resolver | M5.3 | 3 | Tested (local) |
@@ -216,7 +216,7 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 | 25 | Arcade ⇄ Verifier Clean skin switch | M3.2 | 4 | Tested (local, passport) |
 | 26 | Category cloaking and selective disclosure | M9.3 | 5 | In Progress (profile fields; cloaking public on-chain hours declined) |
 | 27 | One-click erasure (crypto-shredding) | M9.2 | 5 | Tested (local) |
-| 28 | ERC-5484 burn and guardian recovery | M8.3, wallet recovery | 6 | In Progress (burn ✓) |
+| 28 | ERC-5484 burn and guardian recovery | M8.3, wallet recovery | 6 | In Progress (burn ✓; recovery deferred) |
 | 29 | Break-glass auditor access log | M7.5 | 5 | Not needed yet (auditors can't access private data) |
 | 30 | Public NGO trust scorecard | M7 | 5 | Not Started |
 | 31 | LinkedIn Open Badges 3.0 push | M8.6 | 5 | Not Started (credentials exist; LinkedIn integration not built) |

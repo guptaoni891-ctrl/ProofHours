@@ -115,6 +115,13 @@ Pure functions shared by the page and the tests. Inputs are only the ledger's to
 | Transcript | Browser | Print view built from the passport (Save as PDF), QR to the live passport. |
 | NGO reports | Indexer `GET /reports/org/:id` (public) | Hours by area and period, corrected/revoked counts; no volunteer data. |
 
+### Readiness (Stage 6)
+- **Operations:** both services have `/health` and `/metrics`, JSON access logs (path only), per-client rate limits (`RATE_LIMIT`, `429` + `Retry-After`) and `nosniff`. See [V2_RUNBOOKS.md](V2_RUNBOOKS.md).
+- **Static site:** a Content Security Policy in a `<meta>` tag (scripts only from the site, no inline scripts, no `eval`). GitHub Pages can't send headers, so `frame-ancestors` needs a host that can.
+- **Arabic:** `docs/i18n.js` switches `lang`/`dir`; the stylesheet uses logical properties, so the layout mirrors; untranslated English blocks keep their own direction (`unicode-bidi: plaintext`).
+- **Offline vouchers:** paper codes for sites without a signal; they become attendance that still needs approval.
+- **Capacity:** see [V2_LOAD_TEST_REPORT.md](V2_LOAD_TEST_REPORT.md). Search is CPU-bound (~336 req/s per process at 10,000 events).
+
 ## 4. Target architecture (Stages 3–6)
 
 ### Decisions recorded in Stage 3

@@ -30,6 +30,8 @@ python -m http.server 8765 --directory docs    # open http://localhost:8765/?loc
 - **Stage 5 settings (attendance service):** `VAULT_KEYS_DB` (`server/data/vault-keys.sqlite`, keep it apart from the main database and its backups), `PUBLIC_URL` (used in credential status links), `BADGES` (badge contract). The indexer needs the **same** `ATTENDANCE_SECRET` for auditor views.
 - **Indexer:** settings `PORT` (8792), `RPC_URL`, `LEDGER`, `CHAIN_ID`, `CONFIRMATIONS` (2), `START_BLOCK` (found automatically), `POLL_MS` (2000), `INDEXER_DB` (`server/data/indexer.sqlite`). The page finds it through `config.js` → `local.indexer`, or `?search=`. To rebuild from scratch, stop it and delete the database file.
 - **Search benchmark:** `node server/bench-search.js 100000 1000`.
+- **Load test:** `node server/loadgen.js 50` (results in [V2_LOAD_TEST_REPORT.md](V2_LOAD_TEST_REPORT.md)).
+- **Operations:** `RATE_LIMIT` (300 attendance / 600 indexer per minute per client), `LOG_REQUESTS=0` to silence access logs. Runbooks: [V2_RUNBOOKS.md](V2_RUNBOOKS.md).
 - **Fixed addresses:** the deployer `0x…50000001` has nonce 0 on Base Sepolia, so on every fresh fork the V2 contracts get the same addresses, which match `docs/config.js` → `local.v2`.
 - **Demo seed:** "Green Shores NGO (demo)" (coordinator = the V1 issuer wallet, so V1 records can be linked) and "Desert Bloom NGO (demo)".
 

@@ -84,6 +84,15 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
 | CSV formula injection in reports | Cells quoted; leading `= + - @` neutralised | code |
 | Key management | **Shortcut:** issuer and vault master keys derived from `ATTENDANCE_SECRET`. Production needs a KMS/HSM (Blocked) | open |
 
+### Readiness (Stage 6)
+| Threat | Mitigation | Evidence |
+|---|---|---|
+| Request floods | Per-client fixed-window rate limits on both services (`429`, `Retry-After`) | S-ATT operations test |
+| Script injection on the site | CSP: `script-src 'self'`, no inline scripts, `object-src 'none'`, `base-uri 'self'`; user-written text is escaped | E2E suites run with the CSP active |
+| Secrets in logs | Access logs record method, path, status and time only | code review |
+| Forged or reused offline vouchers | HMAC-tagged codes, single use (atomic update), 7-day window; redemption still needs approval | S-ATT voucher test |
+| Leaked service secret | Rotation runbook (§5e); its knock-on effect on derived keys is why a KMS is required in production | runbooks |
+
 ## 4. Static analysis
 - **Forge lint:** run. Findings triaged:
   - `unsafe-typecast`: `uint64(block.timestamp)` and `uint32(block.timestamp / 1 days)` can't truncate for millions of years.
@@ -102,9 +111,10 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
 - **Never on-chain:** names, emails, real student IDs, salts, raw GPS, sensitive affiliations.
 - **No compliance claim.** GDPR and UAE PDPL compliance needs legal review and a DPIA (**Blocked: legal**).
 
-## 6. Known limitations (after Stage 2)
+## 6. Known limitations
 - **Wallet recovery:** not built yet (designed in the architecture doc, §3).
 - **Multisig and timelock:** not set up. The deploy script supports handing admin to a multisig, but none exists yet.
 - **NGO verification (KYB):** governance registers NGOs manually; KYB is Blocked on vendors.
 - **Evidence hashes:** attendance-based issuance uses real attendance evidence; the manual roster on the V2 issuance page still hashes the roster line.
-- **Attendance service:** local only; no rate limiting; no forgotten-check-out flow (the coordinator can only reject); rows are updated in place rather than kept as an append-only log.
+- **Attendance service:** local only; no forgotten-check-out flow (the coordinator can only reject); rows are updated in place rather than kept as an append-only log.
+- **Static analysers:** still not run (install approval). **No independent audit.**
