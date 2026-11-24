@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>ProofHours · Verifiable Volunteer Impact</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233B82F6'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -152,6 +152,7 @@
     <!-- ================= VERIFY ================= -->
     <section id="verify" class="page" data-title="Verify Hours" hidden>
       <p class="page-intro">Confirm in seconds that a student's hours were recorded by an accredited NGO and never altered. No wallet or account needed.</p>
+      <div class="print-only print-head"><strong>ProofHours verification report</strong><span id="printMeta"></span></div>
       <div class="verify-layout">
         <form id="verifyForm" class="panel form-panel" novalidate>
           <h3>Look up a student</h3>
@@ -238,13 +239,23 @@
             <label class="field narrow"><span>Hours</span><input id="rHours" type="number" min="1" required value="4"></label>
           </div>
           <label class="field"><span>Salt</span><input id="rSalt" class="mono" required placeholder="0x…" autocomplete="off" spellcheck="false"></label>
+          <div id="rDup" class="warn-box" role="status" hidden></div>
           <button type="submit" class="btn btn-primary">Record hours</button>
           <div class="msg" role="alert"></div>
           <div id="receipt"></div>
         </form>
 
+        <div id="pickPanel" class="panel span-2">
+          <div class="panel-head"><h3><span class="step">3</span>Find the record to fix</h3><span class="hint">corrections and revocations add new entries</span></div>
+          <label class="field"><span>Search records</span><input id="pickSearch" type="search" placeholder="Record #, S-002, fingerprint, event, NGO or status" autocomplete="off" aria-controls="pickList"></label>
+          <label class="check"><input id="pickMine" type="checkbox" checked> Only records my wallet can fix</label>
+          <ul id="pickList" class="pick-list" aria-label="Records"><li class="muted small">Loading records…</li></ul>
+          <p class="small muted">Only the latest entry of a record, issued by your NGO, can be corrected or revoked. Older entries and revocations are shown for reference but can't be selected.</p>
+        </div>
+
         <form id="correctForm" class="panel form-panel">
-          <div class="panel-head"><h3><span class="step">3</span>Correct a record</h3><span class="hint">adds a new entry</span></div>
+          <div class="panel-head"><h3><span class="step">4</span>Correct a record</h3><span class="hint">adds a new entry</span></div>
+          <div class="pick-preview" data-preview>Pick a record above, or type its number.</div>
           <div class="field-row">
             <label class="field"><span>Record #</span><input id="cId" type="number" min="1" required></label>
             <label class="field"><span>Correct hours</span><input id="cHours" type="number" min="1" required></label>
@@ -255,7 +266,8 @@
         </form>
 
         <form id="revokeForm" class="panel form-panel">
-          <div class="panel-head"><h3><span class="step">4</span>Revoke a record</h3><span class="hint">adds a new entry</span></div>
+          <div class="panel-head"><h3><span class="step">5</span>Revoke a record</h3><span class="hint">adds a new entry</span></div>
+          <div class="pick-preview" data-preview>Pick a record above, or type its number.</div>
           <label class="field"><span>Record #</span><input id="xId" type="number" min="1" required></label>
           <label class="field"><span>Reason code</span><input id="xReason" required value="ATTENDANCE_VOID" list="reasons" maxlength="31"></label>
           <button type="submit" class="btn btn-danger">Append revocation</button>
@@ -416,8 +428,8 @@
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script src="vendor/ethers.umd.min.js"></script>
-<script src="config.js?v=7"></script>
-<script src="demo-volunteers.js?v=7"></script>
-<script src="app.js?v=7"></script>
+<script src="config.js?v=8"></script>
+<script src="demo-volunteers.js?v=8"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

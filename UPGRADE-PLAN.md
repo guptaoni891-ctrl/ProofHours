@@ -118,6 +118,23 @@ Home (role selection + live network stats)
 | 7 | Contract v2 + SBT contract (categories, wallet link, ERC-5192/5484) on a **new** address | Unlocks real minting | L |
 | 8 | Indexer and search, event discovery, QR check-in, leaderboards (opt-in) | Need a backend | L |
 
+## Status (branch `feature/gamified-v2`)
+
+- **Done:**
+  - role-selection home page;
+  - My Impact dashboard (computed milestones, labelled "not minted");
+  - searchable record picker with previews and eligibility guards;
+  - live duplicate warning (`hasRecorded`);
+  - a contract pre-check before the wallet opens;
+  - admin confirmation cards;
+  - success summaries read from the receipt's events;
+  - a print-friendly Verify report.
+- **Deliberately not built:**
+  - Trophy Vault, Arcade/Clean themes, `[ENV]` category tags;
+  - leaderboards and quests, QR check-in, event discovery, minted SBTs.
+
+  These stay in Phase 4 below, because each needs a real on-chain or backend source. Until then the UI must not show badges or rankings that look like credentials.
+
 ## 6. Implementation phases
 
 - **Phase 1 (front end only, this branch):**

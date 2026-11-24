@@ -180,6 +180,7 @@ async function refreshRole() {
     toast(friendly(e), "err");
   }
   renderWallet();
+  if (!$("coord").hidden) loadPicker();
   if (account) loadMyEvents(account).catch((e) => {
     console.warn(e);
     $("rEvent").innerHTML = `<option value="">Could not load your events (see the warning at the top)</option>`;
@@ -263,11 +264,15 @@ async function send(form, fn, argsFn) {
   btn.disabled = true;
   btn.classList.add("busy");
   msg.className = "msg";
-  msg.textContent = "Confirm in your wallet…";
+  msg.textContent = "Checking with the contract…";
   let entry;
   try {
     const args = argsFn();
     const c = await walletContract();
+    // Dry-run as this wallet through the public RPC: any contract refusal shows here, before MetaMask opens.
+    try { await (await reader())[fn].staticCall(...args, { from: await c.runner.getAddress() }); }
+    catch (e) { e.preflight = true; throw e; }
+    msg.textContent = "Confirm in your wallet…";
     const tx = await c[fn](...args);
     entry = { label: TX_LABEL[fn], hash: tx.hash, status: "pending", time: new Date() };
     sessionTx.unshift(entry);
@@ -277,8 +282,9 @@ async function send(form, fn, argsFn) {
     Object.assign(entry, { status: "ok", block: receipt.blockNumber });
     renderTxLists();
     msg.className = "msg ok";
-    msg.innerHTML = `Confirmed in block ${receipt.blockNumber}. ${txLinks(tx.hash)}`;
-    toast(`${TX_LABEL[fn]}: confirmed on-chain`, "ok");
+    const what = summarize(receipt);
+    msg.innerHTML = `${ICON.check}<strong>${esc(what || TX_LABEL[fn] + " confirmed")}</strong><br>Confirmed in block ${receipt.blockNumber}. ${txLinks(tx.hash)}`;
+    toast(`${what || TX_LABEL[fn]}: confirmed on-chain`, "ok");
     snapshotPromise = null; // chain changed: overview and admin re-read next time
     refreshRole();
     return receipt;
@@ -286,12 +292,29 @@ async function send(form, fn, argsFn) {
     logError(`${fn} failed`, e);
     if (entry) { entry.status = "bad"; renderTxLists(); }
     msg.className = "msg err";
-    msg.textContent = friendly(e);
+    msg.textContent = friendly(e) + (e?.preflight ? " Nothing was sent; your wallet was not asked to sign." : "");
     toast(friendly(e), "err");
   } finally {
     btn.disabled = false;
     btn.classList.remove("busy");
   }
+}
+
+// One plain sentence from the contract's own events in a receipt.
+function summarize(receipt) {
+  const out = [];
+  for (const l of receipt.logs) {
+    if (l.address.toLowerCase() !== C.address.toLowerCase()) continue;
+    const e = iface.parseLog(l), a = e?.args;
+    if (!e) continue;
+    if (e.name === "EventCreated") out.push(`Event #${a.eventId} "${a.eventCode}" created (max ${a.maxDurationHours}h)`);
+    if (e.name === "HoursRecorded") out.push(`Record #${a.recordId}: ${a.hoursLogged}h recorded for event #${a.eventId}`);
+    if (e.name === "CorrectionAppended") out.push(`Record #${a.newRecordId} corrects #${a.replacesRecordId} to ${a.newHours}h`);
+    if (e.name === "RevocationAppended") out.push(`Record #${a.newRecordId} revokes #${a.replacesRecordId}`);
+    if (e.name === "CoordinatorRegistered") out.push(`${short(a.coordinator)} registered as "${a.orgLabel}"`);
+    if (e.name === "CoordinatorRevoked") out.push(`${short(a.coordinator)} revoked`);
+  }
+  return out.join(" · ");
 }
 
 const needAddress = (a) => { if (!ethers.isAddress(a)) throw new Error("That is not a valid wallet address (0x followed by 40 hex characters)."); return a; };
@@ -413,6 +436,103 @@ async function diagnose() {
   }
 }
 
+// ---------- Coordinator helpers: duplicate warning and record picker ----------
+// Live R3 check while choosing event + volunteer, so a duplicate never reaches the wallet.
+let dupSeq = 0;
+async function dupCheck() {
+  const ev = $("rEvent").value, id = $("rId").value.trim(), salt = $("rSalt").value.trim(), box = $("rDup");
+  const btn = $("recordForm").querySelector("button[type=submit]");
+  const seq = ++dupSeq;
+  box.hidden = true;
+  btn.disabled = false;
+  if (!ev || !id || badSalt(salt)) return;
+  try {
+    const dup = await (await reader()).hasRecorded(ev, fingerprint(salt, id));
+    if (seq !== dupSeq || !dup) return;
+    box.innerHTML = `${ICON.alert}<span><strong>${esc(id)} already has a record for event #${esc(ev)}.</strong> The contract allows one record per volunteer per event. To change those hours, use "Correct a record" below.</span>`;
+    box.hidden = false;
+    btn.disabled = true;
+  } catch (e) { console.warn("duplicate check skipped", e); }
+}
+
+let pickRows = [];
+async function loadPicker() {
+  try {
+    const s = await snapshot();
+    const byId = new Map(s.recs.map((r) => [r.id, r]));
+    const ngo = new Map(s.owners.map((a, i) => [a.toLowerCase(), s.orgs[i].orgLabel]));
+    const demo = new Map(DEMO_VOLUNTEERS.map((d) => [demoFp(d.id), d.id]));
+    pickRows = s.recs.map((r) => {
+      let head = r, orig = r;
+      while (head.supersededBy && byId.has(head.supersededBy)) head = byId.get(head.supersededBy);
+      while (orig.replacesRecordId && byId.has(orig.replacesRecordId)) orig = byId.get(orig.replacesRecordId);
+      const mine = !!account && r.issuer.toLowerCase() === account.toLowerCase();
+      const status = r.entryType === 2n ? "Revocation" : r.supersededBy ? `Superseded by #${r.supersededBy}` : "Current";
+      const why = r.entryType === 2n ? "A revocation is final and can't be changed."
+        : r.supersededBy ? `Already replaced. Fix the latest entry, #${head.id}, instead.`
+        : !mine ? "Issued by another NGO wallet. Only the issuer can fix it." : "";
+      return {
+        id: Number(r.id), fp: r.volunteerCommitment, status, why,
+        label: demo.has(r.volunteerCommitment) ? `Demo volunteer ${demo.get(r.volunteerCommitment)}` : `Fingerprint ${short(r.volunteerCommitment)}`,
+        event: s.evs[Number(r.eventId) - 1]?.eventCode ?? `event #${r.eventId}`,
+        ngo: ngo.get(r.issuer.toLowerCase()) ?? short(r.issuer),
+        orig: Number(orig.hoursLogged), now: head.entryType === 2n ? 0 : Number(head.hoursLogged),
+      };
+    }).reverse();
+    renderPicker();
+    showPreviews();
+  } catch (e) {
+    $("pickList").innerHTML = `<li class="muted small">${esc(friendly(e))}</li>`;
+  }
+}
+
+function renderPicker() {
+  const q = $("pickSearch").value.trim().toLowerCase(), onlyMine = $("pickMine").checked;
+  const rows = pickRows.filter((p) => (!onlyMine || !p.why) && (!q || [`#${p.id}`, p.label, p.event, p.ngo, p.status, p.fp].join(" ").toLowerCase().includes(q)));
+  const sel = Number($("cId").value);
+  $("pickList").innerHTML = rows.length ? rows.map((p) => `<li><button type="button" class="pick${p.why ? " off" : ""}" data-pick="${p.id}"${p.why ? ' aria-disabled="true"' : ""} aria-pressed="${p.id === sel}">
+      <span class="pk-id">#${p.id}</span>
+      <span class="pk-main"><strong>${esc(p.label)}</strong><span>${esc(p.event)} · ${esc(p.ngo)}</span></span>
+      <span class="pk-hours">${p.orig}h original<strong>${p.now}h now</strong></span>
+      <span class="badge ${p.status === "Current" ? "ok" : p.status === "Revocation" ? "bad" : "warn"}">${esc(p.status)}</span>
+      ${p.why ? `<span class="pk-why">${esc(p.why)}</span>` : ""}</button></li>`).join("")
+    : `<li class="muted small">${onlyMine ? `No records your wallet can fix${q ? " match this search" : ""}. Untick the box to see every record.` : "No records match this search."}</li>`;
+}
+
+// Preview of the chosen record in each fix form; also blocks known-ineligible numbers typed by hand.
+const pickFor = (input) => pickRows.find((p) => p.id === Number(input.value));
+function showPreviews() {
+  for (const [form, input] of [["correctForm", "cId"], ["revokeForm", "xId"]]) {
+    const p = pickFor($(input)), box = $(form).querySelector("[data-preview]");
+    box.className = "pick-preview" + (p ? (p.why ? " bad" : " ok") : "");
+    box.innerHTML = !$(input).value ? "Pick a record above, or type its number."
+      : !p ? `Record #${esc($(input).value)} isn't in the loaded list; the contract will still check it before your wallet opens.`
+      : `<strong>#${p.id} · ${esc(p.label)}</strong> · ${esc(p.event)} · ${p.orig}h original, ${p.now}h now · ${esc(p.ngo)} · ${esc(p.status)}${p.why ? `<br>${esc(p.why)}` : ""}`;
+  }
+}
+const guardPick = (input, form) => {
+  const p = pickFor(input);
+  if (!p?.why) return true;
+  const m = form.querySelector(".msg");
+  m.className = "msg err";
+  m.textContent = p.why + " Nothing was sent.";
+  return false;
+};
+
+// Admin writes: show what will change and ask once more before the wallet opens.
+function confirmCard(form, html, okLabel, onOk) {
+  form.querySelector(".confirm-card")?.remove();
+  const card = document.createElement("div");
+  card.className = "confirm-card";
+  card.setAttribute("role", "group");
+  card.setAttribute("aria-label", "Please confirm");
+  card.innerHTML = `${html}<div class="cc-actions"><button type="button" class="btn btn-primary" data-ok>${okLabel}</button><button type="button" class="btn btn-ghost" data-cancel>Cancel</button></div>`;
+  form.querySelector(".msg").before(card);
+  card.querySelector("[data-cancel]").onclick = () => card.remove();
+  card.querySelector("[data-ok]").onclick = () => { card.remove(); onOk(); };
+  card.querySelector("[data-ok]").focus();
+}
+
 // ---------- Verify ----------
 const verdictOf = (h) => (h.entryType === 2n ? "REVOKED" : h.replacesRecordId !== 0n ? "CORRECTED" : "VALID");
 const effectiveHours = (h) => (h.entryType === 2n ? 0 : Number(h.hoursLogged));
@@ -456,7 +576,8 @@ async function verify() {
   out.innerHTML = SKELETON;
   try {
     const { fp, results } = await lookupStudent(id, salt);
-    out.innerHTML = renderVerify(id, fp, results, claimed);
+    out.innerHTML = `<div class="print-bar"><button type="button" class="btn btn-ghost sm" data-print>Print or save as PDF</button></div>` + renderVerify(id, fp, results, claimed);
+    $("printMeta").textContent = `Student ${id} · checked ${new Date().toLocaleString()} · contract ${C.address} · ${C.netName} (chain ${C.chainId})`;
     fillTxLinks(out);
   } catch (e) {
     out.innerHTML = "";
@@ -702,7 +823,7 @@ async function runRefusal(btn) {
 
 // ---------- Navigation ----------
 const navItems = [...document.querySelectorAll(".nav-item")];
-const PAGE_LOAD = { overview: () => loadOverview(), admin: loadAdmin, network: loadNetwork };
+const PAGE_LOAD = { overview: () => loadOverview(), admin: loadAdmin, network: loadNetwork, coord: loadPicker };
 
 function showPage(name) {
   document.querySelectorAll(".page").forEach((s) => (s.hidden = s.id !== name));
@@ -776,6 +897,24 @@ document.querySelectorAll("[data-switch]").forEach((b) => (b.onclick = async () 
 
 $("eventForm").onsubmit = (e) => { e.preventDefault(); send(e.target, "createEvent", () => [$("eCode").value.trim(), $("eMax").value]); };
 
+$("pickSearch").oninput = renderPicker;
+$("pickMine").onchange = renderPicker;
+$("pickList").onclick = (e) => {
+  const b = e.target.closest("[data-pick]");
+  if (!b) return;
+  const p = pickRows.find((x) => x.id === Number(b.dataset.pick));
+  if (p.why) return toast(p.why, "err");
+  $("cId").value = $("xId").value = p.id;
+  showPreviews();
+  renderPicker();
+  toast(`Record #${p.id} selected for correction or revocation`, "info");
+};
+$("cId").oninput = $("xId").oninput = showPreviews;
+$("rEvent").addEventListener("change", dupCheck);
+$("rId").addEventListener("input", dupCheck);
+$("rSalt").addEventListener("input", dupCheck);
+$("verifyOut").addEventListener("click", (e) => e.target.closest("[data-print]") && window.print());
+
 $("rPick").innerHTML += DEMO_VOLUNTEERS.slice(0, 5).map((v) => `<option value="${v.id}">Demo volunteer ${v.id}</option>`).join("");
 $("rPick").onchange = () => {
   const pick = $("rPick").value;
@@ -788,6 +927,7 @@ $("rPick").onchange = () => {
     $("rId").value = v.id;
     $("rSalt").value = v.salt;
   }
+  dupCheck();
 };
 $("myEvents").onclick = (e) => {
   const id = e.target.closest("[data-use-event]")?.dataset.useEvent;
@@ -802,6 +942,7 @@ $("recordForm").onsubmit = async (e) => {
   const id = $("rId").value.trim(), salt = $("rSalt").value.trim(), hours = $("rHours").value;
   $("receipt").innerHTML = "";
   const r = await send(e.target, "recordVolunteerHours", () => [$("rEvent").value, fingerprint(needSalt(salt), id), hours]);
+  dupCheck();
   if (!r) return;
   const log = r.logs.map((l) => iface.parseLog(l)).find((l) => l?.name === "HoursRecorded");
   const link = location.href.split("#")[0] + `#id=${encodeURIComponent(id)}&salt=${salt}`;
@@ -816,10 +957,46 @@ $("recordForm").onsubmit = async (e) => {
   };
 };
 
-$("correctForm").onsubmit = (e) => { e.preventDefault(); send(e.target, "appendCorrection", () => [$("cId").value, $("cHours").value, bytes32($("cReason").value.trim())]); };
-$("revokeForm").onsubmit = (e) => { e.preventDefault(); send(e.target, "appendRevocation", () => [$("xId").value, bytes32($("xReason").value.trim())]); };
-$("regForm").onsubmit = async (e) => { e.preventDefault(); if (await send(e.target, "registerCoordinator", () => [needAddress($("aAddr").value.trim()), $("aLabel").value.trim()])) loadAdmin(); };
-$("revForm").onsubmit = async (e) => { e.preventDefault(); if (await send(e.target, "revokeCoordinator", () => [needAddress($("aRevAddr").value.trim())])) loadAdmin(); };
+$("correctForm").onsubmit = (e) => {
+  e.preventDefault();
+  if (guardPick($("cId"), e.target)) send(e.target, "appendCorrection", () => [$("cId").value, $("cHours").value, bytes32($("cReason").value.trim())]);
+};
+$("revokeForm").onsubmit = (e) => {
+  e.preventDefault();
+  if (guardPick($("xId"), e.target)) send(e.target, "appendRevocation", () => [$("xId").value, bytes32($("xReason").value.trim())]);
+};
+
+const coordStatus = async (addr) => { const [active, label] = await (await reader()).coordinators(addr); return { active, label }; };
+$("regForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const form = e.target, msg = form.querySelector(".msg"), addr = $("aAddr").value.trim(), label = $("aLabel").value.trim();
+  msg.className = "msg err";
+  msg.textContent = !ethers.isAddress(addr) ? "That is not a valid wallet address (0x followed by 40 hex characters)." : !label ? "Enter the organisation label." : "";
+  if (msg.textContent) return;
+  try {
+    const st = await coordStatus(addr);
+    const now = st.active ? `is already an active coordinator as <strong>${esc(st.label)}</strong>. Registering again renames it.`
+      : st.label ? `was revoked (it was <strong>${esc(st.label)}</strong>). Registering re-activates it.` : "has never been registered.";
+    confirmCard(form, `<p><strong>Register this NGO coordinator?</strong></p>
+      <dl class="kv"><dt>Wallet</dt><dd><code>${esc(addr)}</code></dd><dt>Label</dt><dd>${esc(label)}</dd><dt>Right now</dt><dd>This wallet ${now}</dd></dl>
+      <p class="small muted">It will be able to create events and record hours. You can revoke it later; the history stays on-chain.</p>`,
+      "Confirm and open wallet", async () => { if (await send(form, "registerCoordinator", () => [addr, label])) loadAdmin(); });
+  } catch (err) { msg.textContent = friendly(err); }
+};
+$("revForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const form = e.target, msg = form.querySelector(".msg"), addr = $("aRevAddr").value.trim();
+  msg.className = "msg err";
+  msg.textContent = ethers.isAddress(addr) ? "" : "That is not a valid wallet address (0x followed by 40 hex characters).";
+  if (msg.textContent) return;
+  try {
+    const st = await coordStatus(addr);
+    if (!st.active) return (msg.textContent = `This wallet is not an active coordinator${st.label ? ` (it was ${st.label})` : ""}, so revoking would change nothing. Nothing was sent.`);
+    confirmCard(form, `<p><strong>Revoke ${esc(st.label)}?</strong></p>
+      <dl class="kv"><dt>Wallet</dt><dd><code>${esc(addr)}</code></dd><dt>Effect</dt><dd>It can no longer create events or write records. Records it already signed stay on-chain and still show who signed them.</dd></dl>`,
+      "Revoke and open wallet", async () => { if (await send(form, "revokeCoordinator", () => [addr])) loadAdmin(); });
+  } catch (err) { msg.textContent = friendly(err); }
+};
 $("lookupForm").onsubmit = async (e) => {
   e.preventDefault();
   const out = $("lookupOut"), a = $("lookupAddr").value.trim();
