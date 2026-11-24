@@ -615,3 +615,5 @@ dl.mini dd { margin: 0; overflow-wrap: anywhere; }
   a { color: #111 !important; text-decoration: underline; }
   * { animation: none !important; transition: none !important; }
 }
+
+.msg .retry { margin-left: .4rem; vertical-align: middle; }

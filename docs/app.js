@@ -83,7 +83,7 @@ async function connectReader() {
       const t = `The RPC ${new URL(url).host} is chain ${Number(chain)}, but this page expects ${C.netName} (chain ${C.chainId}).${LOCAL ? ` Restart anvil with --chain-id ${C.chainId}.` : ""}`;
       $("netAlert").innerHTML = `${ICON.alert}<div><strong>Wrong chain.</strong> ${esc(t)}</div>`;
       $("netAlert").hidden = false;
-      throw new Error(t);
+      throw Object.assign(new Error(t), { code: "WRONG_CHAIN" });
     }
     $("rpcInfo").textContent = new URL(url).host;
     // Without this, every read fails as "could not decode" and writes become plain transfers to an empty address.
@@ -91,12 +91,12 @@ async function connectReader() {
       const t = `No VolunteerHours contract is deployed at ${C.address} on the network read via ${new URL(url).host}. Deploy it, then put its address in docs/config.js.`;
       $("netAlert").innerHTML = `${ICON.alert}<div><strong>Not connected to a contract.</strong> ${esc(t)}</div>`;
       $("netAlert").hidden = false;
-      throw new Error(t);
+      throw Object.assign(new Error(t), { code: "NO_CONTRACT" });
     }
     return new ethers.Contract(C.address, C.abi, p);
   }
   readerPromise = null; // let the next click retry
-  throw new Error(`Could not reach the ${C.netName} network. Check your internet connection${LOCAL ? " and that anvil is running on " + C.rpcs[0] : ""}, then try again.`);
+  throw Object.assign(new Error(`Could not reach the ${C.netName} network. Check your internet connection${LOCAL ? " and that anvil is running on " + C.rpcs[0] : ""}, then try again.`), { code: "RPC_UNREACHABLE" });
 }
 
 // ---------- Friendly errors ----------
@@ -156,8 +156,12 @@ async function walletContract() {
   const bp = new ethers.BrowserProvider(window.ethereum); // fresh each time so a network switch never breaks it
   const signer = await bp.getSigner();
   if ((await bp.getNetwork()).chainId !== BigInt(C.chainId)) throw new Error(`Your wallet is on the wrong network. Click "Switch to ${C.netName}" and try again.`);
-  if (!(await sameChain(bp))) // also throws the clear "no contract" error first
+  const match = await chainMatch(bp); // also throws the clear "no contract" / "wrong chain" setup errors
+  if (match === "different")
     throw new Error(`Your wallet and this page are on different chains that both use chain id ${C.chainId} (for example the wallet on Base Sepolia while the page reads a local Anvil via ?rpc=, or the reverse). Point both at the same network. Nothing was sent.`);
+  // Fail safe: never hand a transaction to the wallet when the network could not be confirmed.
+  if (!match)
+    throw Object.assign(new Error(`Couldn't confirm that your wallet is on the same network as this page, because a network service is slow or not responding. Nothing was sent. Wait a moment and press Retry.`), { code: "CHAIN_UNVERIFIED" });
   return new ethers.Contract(C.address, C.abi, signer);
 }
 
@@ -293,6 +297,11 @@ async function send(form, fn, argsFn) {
     if (entry) { entry.status = "bad"; renderTxLists(); }
     msg.className = "msg err";
     msg.textContent = friendly(e) + (e?.preflight ? " Nothing was sent; your wallet was not asked to sign." : "");
+    if (["CHAIN_UNVERIFIED", "RPC_UNREACHABLE", "NETWORK_ERROR", "TIMEOUT", "SERVER_ERROR"].includes(e?.code)) {
+      const again = Object.assign(document.createElement("button"), { type: "button", className: "btn btn-ghost sm retry", textContent: "Retry" });
+      again.onclick = () => form.requestSubmit();
+      msg.append(" ", again);
+    }
     toast(friendly(e), "err");
   } finally {
     btn.disabled = false;
@@ -408,13 +417,32 @@ async function loadNetwork() {
   try { $("nBlock").textContent = (await (await reader()).runner.getBlockNumber()).toLocaleString(); } catch (e) { $("nBlock").textContent = "Unavailable"; }
 }
 
-// Same chain id is not enough (two local Anvils, or Anvil vs Base Sepolia): compare the hash of a settled recent block.
-async function sameChain(bp) {
-  const r = (await reader()).runner;
-  // 64 blocks (~2 min on Base) so a wallet RPC that lags behind the page's RPC is not mistaken for another chain
-  const n = Math.max(0, (await r.getBlockNumber()) - 64);
-  const [a, b] = await Promise.all([r.getBlock(n), bp.getBlock(n).catch(() => null)]);
-  return !!b && a.hash === b.hash;
+// Same chain id is not enough (two local Anvils, or Anvil vs Base Sepolia): compare the hash of a settled block.
+// Returns "same", "different", or null when it can't be decided right now (RPC down, or a block not available).
+// Compares at a height both sides report having, so a lagging wallet RPC is never mistaken for another chain.
+// Anything uncertain is null (the caller refuses to send), never "same".
+const HEIGHT_GAP_MAX = 50000; // >1 day of Base blocks: no RPC lags that far, so the chains differ
+async function chainMatch(bp, attempts = 3) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const r = (await reader()).runner;
+      // wallet-side errors just mean "not yet"; page-RPC errors go to catch and trigger failover
+      const [pageTip, walletTip] = await Promise.all([r.getBlockNumber(), bp.getBlockNumber().catch(() => null)]);
+      if (walletTip !== null) {
+        if (Math.abs(pageTip - walletTip) > HEIGHT_GAP_MAX) return "different";
+        // 64 blocks below the lower tip: settled on both sides, and present on the slower one
+        const n = Math.max(0, Math.min(pageTip, walletTip) - 64);
+        const [a, b] = await Promise.all([r.getBlock(n), bp.getBlock(n).catch(() => null)]);
+        if (a && b) return a.hash === b.hash ? "same" : "different";
+      }
+    } catch (e) {
+      if (e?.code === "NO_CONTRACT" || e?.code === "WRONG_CHAIN") throw e;
+      console.warn("chain check attempt failed", e);
+      readerPromise = null; // reconnect next attempt, moving on to the next public RPC if this one is down
+    }
+    if (i < attempts - 1) await new Promise((res) => setTimeout(res, 800 * (i + 1)));
+  }
+  return null;
 }
 
 // Read-only checks for the Network page: compares what the page reads with what the wallet would write to.
@@ -426,11 +454,11 @@ async function diagnose() {
   if (!account) return;
   try {
     const bp = new ethers.BrowserProvider(window.ethereum);
-    const [chain, bal, code, same] = await Promise.all([bp.send("eth_chainId", []), bp.getBalance(account), bp.getCode(C.address), sameChain(bp).catch(() => null)]);
+    const [chain, bal, code, same] = await Promise.all([bp.send("eth_chainId", []), bp.getBalance(account), bp.getCode(C.address), chainMatch(bp).catch(() => null)]);
     set("dChain", `${parseInt(chain, 16)} ${parseInt(chain, 16) === C.chainId ? yes("expected") : no(`expected ${C.chainId}`)}`);
     set("dBal", `${ethers.formatEther(bal)} ETH ${bal === 0n ? no("needs faucet") : ""}`);
     set("dWalletCode", codeBadge((code.length - 2) / 2));
-    set("dSame", same === null ? "—" : same ? yes("Yes") : no("No: different chains"));
+    set("dSame", same === "same" ? yes("Yes") : same === "different" ? no("No: different chains") : '<span class="badge warn">Couldn\'t check right now</span> <span class="small muted">press Re-test</span>');
   } catch (e) {
     logError("wallet diagnostics", e);
     set("dChain", no(friendly(e)));
