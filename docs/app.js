@@ -411,7 +411,8 @@ async function loadNetwork() {
 // Same chain id is not enough (two local Anvils, or Anvil vs Base Sepolia): compare the hash of a settled recent block.
 async function sameChain(bp) {
   const r = (await reader()).runner;
-  const n = Math.max(0, (await r.getBlockNumber()) - 5);
+  // 64 blocks (~2 min on Base) so a wallet RPC that lags behind the page's RPC is not mistaken for another chain
+  const n = Math.max(0, (await r.getBlockNumber()) - 64);
   const [a, b] = await Promise.all([r.getBlock(n), bp.getBlock(n).catch(() => null)]);
   return !!b && a.hash === b.hash;
 }
