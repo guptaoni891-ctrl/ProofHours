@@ -9,6 +9,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 const { ethers } = require("ethers");
+const { mac, safeEq, issue, verify } = require("./session");
+const { trustRoutes } = require("./trust");
 
 const QR_WINDOW = 30; // seconds per rotating QR code; a code is accepted in its own window and the next one
 const SESSION_TTL = 2 * 3600;
@@ -22,6 +24,7 @@ const LEDGER_ABI = [
   "function getOrg(uint256) view returns (tuple(string name, address admin, bool suspended, uint32 dailyIssueCap))",
   "function getEvent(uint256) view returns (tuple(uint256 orgId, uint8 category, uint16 maxHours, uint32 serviceDay, address createdBy, string code))",
   "function totalHours(address) view returns (uint256)",
+  "function hasRole(bytes32, address) view returns (bool)",
   "function originalsOf(address, uint256, uint256) view returns (uint256[] ids, uint256 total)",
   "function headOf(uint256) view returns (tuple(uint256 id, uint256 eventId, address volunteer, uint16 hoursLogged, uint8 entryType, uint8 category, uint256 orgId, address issuer, uint64 recordedAt, uint32 serviceDay, uint256 replacesId, uint256 supersededBy, bytes32 evidenceHash, bytes32 reason, uint256 v1RecordId))",
   "event HoursIssued(uint256 indexed recordId, uint256 indexed eventId, address indexed volunteer, uint16 hoursLogged, uint8 category, bytes32 evidenceHash)",
@@ -35,8 +38,6 @@ const ANIMAL = ["Heron", "Oryx", "Falcon", "Gazelle", "Turtle", "Dolphin", "Lynx
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const fail = (status, message) => { throw new HttpError(status, message); };
 const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
-const mac = (secret, s) => crypto.createHmac("sha256", secret).update(s).digest("base64url").slice(0, 22);
-const safeEq = (a, b) => typeof a === "string" && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const site = (v) => (v === true ? 1 : v === false ? 0 : null); // device-reported yes/no only
 const flag = (v) => (v === null || v === undefined ? null : v === 1);
 
@@ -58,11 +59,21 @@ function openDb(file) {
   return db;
 }
 
-// Read-only view of the V2 ledger. Event lookups return null for unknown events.
-function ledgerChain(rpcUrl, ledger, chainId) {
+// Read-only view of the V2 ledger and badges. Event lookups return null for unknown events.
+function ledgerChain(rpcUrl, ledger, chainId, badgesAddress) {
   const provider = new ethers.JsonRpcProvider(rpcUrl, chainId, { staticNetwork: true });
   const c = new ethers.Contract(ledger, LEDGER_ABI, provider);
+  const b = badgesAddress && new ethers.Contract(badgesAddress, ["function ownerOf(uint256) view returns (address)", "function badges(uint256) view returns (uint8 kind, uint16 threshold, uint64 issuedAt)"], provider);
   return {
+    badgesAddress,
+    isAuditor: (a) => c.hasRole(ethers.id("AUDITOR_ROLE"), a),
+    // held badge -> { owner, kind, threshold }; burned or never minted -> null
+    badge: async (id) => {
+      const owner = await b.ownerOf(id).catch((e) => { if (e.code === "CALL_EXCEPTION") return null; throw e; });
+      if (!owner) return null;
+      const x = await b.badges(id);
+      return { owner, kind: Number(x.kind), threshold: Number(x.threshold) };
+    },
     coordinatorOrg: async (a) => Number(await c.coordinatorOrg(a)),
     optedIn: (a) => c.optedIn(a),
     orgSuspended: async (id) => (await c.getOrg(id)).suspended,
@@ -90,7 +101,7 @@ function ledgerChain(rpcUrl, ledger, chainId) {
   };
 }
 
-function createApp({ db, chain, secret, chainId, now = () => Date.now() }) {
+function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, chainId, publicUrl = "http://127.0.0.1:8790", now = () => Date.now() }) {
   const t = () => Math.floor(now() / 1000);
   const q = (sql) => db.prepare(sql);
 
@@ -104,12 +115,8 @@ function createApp({ db, chain, secret, chainId, now = () => Date.now() }) {
     `ProofHours attendance sign-in\nWallet: ${a}\nChain: ${chainId}\nNonce: ${nonce}\n\nSigning proves you control this wallet. It is free and sends no transaction.`;
 
   function session(req) {
-    const m = /^Bearer (\S+)$/.exec(req.headers.authorization || "");
-    if (!m) fail(401, "Sign in with your wallet first.");
-    const [a, exp, sig] = m[1].split(".");
-    if (!sig || !safeEq(sig, mac(secret, `session.${a}.${exp}`))) fail(401, "Your sign-in is not valid. Sign in again.");
-    if (Number(exp) < t()) fail(401, "Your sign-in expired. Sign in again.");
-    return a;
+    const v = verify(secret, req.headers.authorization, t());
+    return v.address ?? fail(401, v.error);
   }
 
   async function coordinatorFor(me, orgId) {
@@ -162,8 +169,8 @@ function createApp({ db, chain, secret, chainId, now = () => Date.now() }) {
       let signer;
       try { signer = ethers.verifyMessage(signInMessage(a, body.nonce), String(body.signature)); } catch { fail(401, "The signature is not valid."); }
       if (signer !== a) fail(401, "The signature does not match this wallet.");
-      const exp = t() + SESSION_TTL, payload = `${a}.${exp}`;
-      return { token: `${payload}.${mac(secret, "session." + payload)}`, address: a, expiresAt: exp };
+      const exp = t() + SESSION_TTL;
+      return { token: issue(secret, a, exp), address: a, expiresAt: exp };
     },
 
     "POST /shifts": async ({ req, body }) => {
@@ -324,9 +331,10 @@ function createApp({ db, chain, secret, chainId, now = () => Date.now() }) {
     };
   }
 
+  Object.assign(routes, trustRoutes({ db, keysDb, chain, secret, chainId, publicUrl, t, session, fail, q }));
   const table = Object.entries(routes).map(([k, fn]) => {
     const [method, pattern] = k.split(" ");
-    return { method, re: new RegExp(`^${pattern.replace(":id", "(\\d+)")}$`), fn };
+    return { method, re: new RegExp(`^${pattern.replace(":id", "(\\d+)").replace(":addr", "(0x[0-9a-fA-F]{40})")}$`), fn };
   });
 
   function readJson(req) {
@@ -341,7 +349,7 @@ function createApp({ db, chain, secret, chainId, now = () => Date.now() }) {
   return async function handle(req, res) {
     // Bearer tokens, no cookies: any origin may call, nothing ambient is sent.
     const reply = (status, obj) => {
-      res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "content-type, authorization", "access-control-allow-methods": "GET, POST, OPTIONS", "cache-control": "no-store" });
+      res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "content-type, authorization", "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "cache-control": "no-store" });
       res.end(obj === undefined ? "" : JSON.stringify(obj));
     };
     if (req.method === "OPTIONS") return reply(204);
@@ -350,8 +358,8 @@ function createApp({ db, chain, secret, chainId, now = () => Date.now() }) {
       let m;
       const route = table.find((r) => r.method === req.method && (m = r.re.exec(url.pathname)));
       if (!route) fail(404, "Not found.");
-      const body = req.method === "POST" ? await readJson(req) : {};
-      reply(200, await route.fn({ req, url, body, id: m[1] && Number(m[1]) }));
+      const body = req.method === "POST" || req.method === "PUT" ? await readJson(req) : {};
+      reply(200, await route.fn({ req, url, body, id: m[1] && Number(m[1]), param: m[1] }));
     } catch (e) {
       if (e instanceof HttpError) return reply(e.status, { error: e.message });
       const transport = ["NETWORK_ERROR", "TIMEOUT", "SERVER_ERROR", "ECONNREFUSED"].includes(e?.code) || e?.cause?.code === "ECONNREFUSED";
@@ -372,8 +380,11 @@ if (require.main === module) {
   const ledger = env.LEDGER || "0xd714101097150109C3b0D8d30451280680ED44bA"; // local deterministic V2 ledger (docs/config.js)
   const rpc = env.RPC_URL || "http://127.0.0.1:8546";
   const db = openDb(env.ATTENDANCE_DB || path.join(__dirname, "data", "attendance.sqlite"));
+  // the vault's data keys live in their own database, so erasing a key also defeats copies of the main database
+  const keysDb = new DatabaseSync(env.VAULT_KEYS_DB || path.join(__dirname, "data", "vault-keys.sqlite"));
   const port = Number(env.PORT || 8790);
-  http.createServer(createApp({ db, chain: ledgerChain(rpc, ledger, chainId), secret, chainId }))
+  const badges = env.BADGES || "0x64d4972B737C1ECfab6FEdE9AD201D28660a35F4"; // local deterministic V2 badges (docs/config.js)
+  http.createServer(createApp({ db, keysDb, chain: ledgerChain(rpc, ledger, chainId, badges), secret, chainId, publicUrl: env.PUBLIC_URL || `http://127.0.0.1:${port}` }))
     .listen(port, "127.0.0.1", () => console.log(`Attendance service on http://127.0.0.1:${port} (ledger ${ledger} via ${rpc})`));
 }
 
