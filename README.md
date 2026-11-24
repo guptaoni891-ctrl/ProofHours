@@ -163,7 +163,10 @@ We also checked the front end in a headless browser against the live deployment.
   ```
 
   Then put the new address in `docs/config.js`.
-- **Offline development:** `?local` points the page at a local Anvil node on `127.0.0.1:8546`, using chain ID 31337 and the `local` block in `config.js`. It is not used by the live demo.
+- **Safe local write tests:** `?local` points the page at a private local *fork* of Base Sepolia on `127.0.0.1:8546`, using chain ID 31337 and the `local` block in `config.js`.
+  - Start the fork with `anvil --fork-url https://base-sepolia-rpc.publicnode.com --chain-id 31337 --port 8546`.
+  - The fork holds a copy of the live contract and records. Transactions sent there never reach Base Sepolia.
+  - It is not used by the live demo.
 
 ## Limitations and future improvements
 

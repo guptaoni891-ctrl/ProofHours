@@ -1,0 +1,14 @@
+{
+  "name": "proofhours-e2e",
+  "private": true,
+  "description": "End-to-end tests for the ProofHours front end: read-only against live Base Sepolia, writes only on an isolated local fork.",
+  "scripts": {
+    "test": "node run.js",
+    "test:live": "node run.js live",
+    "test:fork": "node run.js fork"
+  },
+  "devDependencies": {
+    "ethers": "6.17.0",
+    "puppeteer-core": "24.43.1"
+  }
+}

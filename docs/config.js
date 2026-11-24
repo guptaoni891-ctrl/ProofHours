@@ -9,8 +9,8 @@ window.CONFIG = {
   // Read-only RPCs, tried in order. `?rpc=<url>` overrides (local anvil fork backup).
   rpcs: [
     "https://base-sepolia-rpc.publicnode.com",
-    "https://base-sepolia.drpc.org",
     "https://sepolia.base.org",
+    "https://base-sepolia.drpc.org", // last: the free tier often times out (408)
   ],
   explorers: [
     { name: "BaseScan", url: "https://sepolia.basescan.org" },
@@ -19,14 +19,15 @@ window.CONFIG = {
   // Registered by script/Seed.s.sol; no known key, used only for the "non-issuer correction" staticCall.
   secondCoordinator: "0x000000000000000000000000000000000000dEaD",
   demoEventId: 1,
-  // Used with `?local` or a localhost `?rpc=`. Its own chain id means MetaMask can never mix it up with Base Sepolia.
-  // Start it with: anvil --chain-id 31337 --port 8546 --state .anvil/state.json   (then deploy + seed)
+  // Used with `?local` or a localhost `?rpc=`: a private local FORK of Base Sepolia, for safe write tests.
+  // Its own chain id means MetaMask can never mix it up with Base Sepolia. Nothing written there reaches the public chain.
+  // Start it with: anvil --fork-url https://base-sepolia-rpc.publicnode.com --chain-id 31337 --port 8546
   local: {
-    netName: "Anvil Local",
+    netName: "Anvil Local (fork)",
     chainId: 31337,
     chainIdHex: "0x7a69",
     rpcs: ["http://127.0.0.1:8546"],
-    address: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    address: "0xFbDC02860EA7d34Cd563d8Bd4420C6F713e29F9b", // same contract and records as Base Sepolia, copied into the fork
     explorers: [],
   },
   abi: [
