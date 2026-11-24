@@ -31,6 +31,17 @@
   });
 
   const ledgerTarget = () => walletContract(V2.ledger, ABI.ledger);
+  const badgesTarget = () => walletContract(V2.badges, ABI.badges);
+  const bIface = new ethers.Interface(ABI.badges);
+  Object.assign(TX_LABEL, { renounce: "Renounce badge", reclaim: "Reclaim badge", resyncBadges: "Re-mint badges" });
+  LOG_DECODERS.push((log) => {
+    if (!V2 || log.address.toLowerCase() !== V2.badges.toLowerCase()) return null;
+    const e = bIface.parseLog(log), a = e?.args;
+    if (e?.name === "BadgeRenounced") return `Badge #${a.tokenId} renounced and burned`;
+    if (e?.name === "BadgeReclaimed") return "Badge reclaimed";
+    if (e?.name === "Issued") return `Badge #${a.tokenId} minted`;
+    return null;
+  });
   const currentAccount = async () => (window.ethereum ? (await ethereum.request({ method: "eth_accounts" }))[0] : undefined);
   const keyOf = (v, kind, t) => ethers.keccak256(coder.encode(["address", "uint8", "uint16"], [v, kind, t]));
   const dayOf = (dateStr) => Math.floor(Date.parse(dateStr + "T00:00:00Z") / 86400000);
@@ -81,6 +92,8 @@
       $("ppSummary").innerHTML = "";
       $("ppVault").innerHTML = `<p class="muted small">Connect a wallet to see its badges.</p>`;
       $("ppRecords").innerHTML = `<li class="muted small">No wallet connected.</li>`;
+      gameReady = false;
+      applyMode();
       return;
     }
     const [opted, total, cats] = await Promise.all([c.ledger.optedIn(me), c.ledger.totalHours(me), c.ledger.categoryHours(me)]);
@@ -101,32 +114,140 @@
         return `<li class="cat c${i}"><span class="cat-name">${name}</span><span class="cat-bar" aria-hidden="true"><span style="--p:${n ? Math.round((h / n) * 100) : 100}%"></span></span><span class="cat-h mono">${h}h${n ? `<em> / ${n}</em>` : ""}</span></li>`;
       }).join("")}</ul>`;
 
-    await renderVault(c, me, t, catH);
-    await renderRecords(c, me);
+    await renderVault(c, me, t, catH, !pub);
+    const heads = await renderRecords(c, me);
+    renderGame(t, catH, heads, opted, !pub);
+    await renderLeague(!pub, opted);
   }
 
-  async function renderVault(c, me, total, catH) {
+  // ---------- Progress (Stage 4): everything below derives from verified on-chain data only ----------
+  let gameReady = false;
+  const MODE_KEY = "proofhours-view";
+  // Arcade shows game elements; Clean is the institutional view (same verified data, no game layer).
+  function applyMode() {
+    const mode = localStorage.getItem(MODE_KEY) || (viewAddr ? "clean" : "arcade");
+    $("ppGame").hidden = mode !== "arcade" || !gameReady;
+    $("ppMode").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+  }
+  $("ppMode").onclick = (e) => { const b = e.target.closest("[data-mode]"); if (b) { localStorage.setItem(MODE_KEY, b.dataset.mode); applyMode(); } };
+
+  const COMPANION = [
+    '<svg viewBox="0 0 64 64"><path d="M8 52h48"/><ellipse cx="32" cy="48" rx="5" ry="3.5" class="fill"/></svg>',
+    '<svg viewBox="0 0 64 64"><path d="M8 52h48M32 52V38"/><path d="M32 42c-6 0-9-4-9-8 5 0 9 3 9 8Zm0-2c5 0 8-3 8-7-5 0-8 3-8 7Z" class="fill"/></svg>',
+    '<svg viewBox="0 0 64 64"><path d="M8 52h48M32 52V24"/><path d="M32 44c-7 0-11-4-11-9 6 0 11 4 11 9Zm0-8c7 0 10-4 10-9-6 0-10 4-10 9Zm0-6c-5 0-8-3-8-7 5 0 8 3 8 7Z" class="fill"/></svg>',
+    '<svg viewBox="0 0 64 64"><path d="M8 52h48M32 52V34"/><circle cx="32" cy="26" r="13" class="fill"/></svg>',
+    '<svg viewBox="0 0 64 64"><path d="M8 52h48M32 52V36"/><circle cx="32" cy="24" r="17" class="fill"/><circle cx="25" cy="20" r="2.2" class="fruit"/><circle cx="38" cy="27" r="2.2" class="fruit"/><circle cx="35" cy="15" r="2.2" class="fruit"/></svg>',
+  ];
+  const STAGE_NAMES = ["Seed", "Sprout", "Sapling", "Young tree", "Grove keeper"];
+
+  function renderGame(total, catH, heads, opted, own) {
+    const P = window.Progress, lv = P.level(total);
+    const st = P.streak(heads.filter((h) => h.hours > 0).map((h) => h.serviceDay), Math.floor(Date.now() / 86400000));
+    const pm = P.polymath(catH), stage = P.companion(lv.level), value = P.twin(total, C.impactRate);
+    $("ppCompanion").innerHTML = COMPANION[stage] + `<span>${STAGE_NAMES[stage]}</span>`;
+    $("ppCompanion").setAttribute("aria-label", `Impact Companion: ${STAGE_NAMES[stage]}, grows with verified hours`);
+    const pct = Math.round((lv.into / (lv.next - lv.floor)) * 100);
+    $("ppStats").innerHTML = `
+      <div class="gs"><span>Civic level</span><strong>${lv.level}</strong>
+        <div class="ms-bar" role="progressbar" aria-label="Progress to level ${lv.level + 1}" aria-valuemin="0" aria-valuemax="${lv.next - lv.floor}" aria-valuenow="${lv.into}"><span style="--p:${pct}%"></span></div>
+        <small>${lv.need}h to level ${lv.level + 1}</small></div>
+      <div class="gs"><span>Weekly streak</span><strong>${st.weeks} wk</strong><small>${st.shields} freeze shield${st.shields === 1 ? "" : "s"} · best ${st.best} wk${st.weeks && !st.activeThisWeek ? " · serve this week to extend it" : ""}</small></div>
+      <div class="gs"><span>Polymath</span><strong>${["—", "Polymath", "Polymath II"][pm.tier]}</strong><small>${pm.areas} of 5 areas at 10h+ · title at 3, II at 5</small></div>
+      ${!value ? "" : `<div class="gs twin"><span>Impact Twin <em class="badge neutral">estimate</em></span><strong>≈ ${value.toLocaleString("en-US", { style: "currency", currency: C.impactRate.currency, maximumFractionDigits: 0 })}</strong>
+        <small>${total}h × ${C.impactRate.perHour} ${esc(C.impactRate.currency)}/h, the ${esc(C.impactRate.label)}. Context only: not money earned, paid or owed. <a href="${C.impactRate.source}" target="_blank" rel="noopener">Source</a></small></div>`}`;
+    const spark = P.firstSpark({ opted, total });
+    $("ppSpark").hidden = !own || spark.every((x) => x.done);
+    $("ppSpark").innerHTML = `<div class="panel-head"><h3>First Spark</h3><span class="hint">${spark.filter((x) => x.done).length} of 3 done</span></div>
+      <ol class="quest">${spark.map((x) => `<li class="${x.done ? "done" : ""}">${x.done ? ICON.check : '<span class="q-dot" aria-hidden="true"></span>'}<span>${x.label}</span>${x.done ? '<span class="badge ok">done</span>' : ""}</li>`).join("")}</ol>`;
+    $("ppTrees").innerHTML = P.trees(catH).map((a, i) => `<div class="tree c${i}"><span class="tree-name">${CATS[i]}</span>
+      <ol class="tree-nodes" aria-label="${CATS[i]}: ${a.tiers.filter((x) => x.reached).length} of 5 tiers">${a.tiers.map((x) => `<li class="${x.reached ? "on" : ""}" title="${x.threshold}h ${x.reached ? "reached" : "not reached"}">${x.threshold}</li>`).join("")}</ol>
+      <span class="tree-h mono">${a.hours}h</span></div>`).join("");
+    gameReady = true;
+    applyMode();
+  }
+
+  async function renderLeague(own, opted) {
+    const f = $("leagueForm");
+    f.hidden = !(own && opted && API);
+    if (f.hidden) return;
+    f.querySelector(".msg").className = "msg";
+    f.querySelector(".msg").textContent = "";
+    showLeague((await signedIn()) ? await api("/league/me").catch(() => null) : null);
+  }
+  function showLeague(L) {
+    $("lgBtn").textContent = L?.joined ? "Leave the league" : "Join or view my league";
+    $("lgBtn").dataset.action = L?.joined ? "leave" : "join";
+    $("lgBody").innerHTML = !L?.joined
+      ? "Leagues are optional. Join to be ranked by a generated alias against up to 30 volunteers with similar experience, on verified hours served this month. You see only the 3 above and 3 below you, and you can leave at any time."
+      : `<p>Season ${dateOf(L.season.start)} to ${dateOf(L.season.end)} · ${esc(L.band)} · you are <strong>${esc(L.alias)}</strong>, rank ${L.rank} of ${L.cohortSize}</p>
+        <ol class="strip">${L.strip.map((x) => `<li class="${x.you ? "you" : ""}"><span class="mono">#${x.rank}</span><span>${esc(x.alias)}${x.you ? " (you)" : ""}</span><strong>${x.hours}h</strong></li>`).join("")}</ol>`;
+  }
+  $("leagueForm").onsubmit = (e) => {
+    e.preventDefault();
+    const leave = $("lgBtn").dataset.action === "leave";
+    act(e.target, async () => { const L = await api(leave ? "/league/leave" : "/league/join", { method: "POST" }); showLeague(L); return L; },
+      (L) => (L.joined ? `<strong>You're in this month's league.</strong> Rank ${L.rank} of ${L.cohortSize}.` : "<strong>You left the league.</strong> You are no longer ranked anywhere."));
+  };
+
+  let vaultOwner = null;
+  async function renderVault(c, me, total, catH, own) {
+    vaultOwner = me;
+    const label = (k, th) => `${th}h ${k === 0 ? "total" : CATS[k - 1]}`;
     const slots = [...TOTAL_T.map((th) => [0, th]), ...CAT_T.flatMap((th) => [1, 2, 3, 4, 5].map((k) => [k, th]))];
     const ids = await Promise.all(slots.map(([k, th]) => c.badges.tokenOfKey(keyOf(me, k, th))));
     const earned = slots.map((s, i) => [...s, ids[i]]).filter(([, , id]) => id !== 0n);
+    // milestones met but with no token: renounced by the holder (shown to the holder only)
+    const met = slots.map((s, i) => [...s, ids[i]]).filter(([k, th, id]) => id === 0n && (k === 0 ? total : catH[k - 1]) >= th);
+    const renounced = own ? (await Promise.all(met.map(async ([k, th]) => ((await c.badges.renounced(keyOf(me, k, th))) ? [k, th] : null)))).filter(Boolean) : [];
+    // unlock animation for badges this browser hasn't shown before (per chain, contract and wallet)
+    const seenKey = `proofhours-seen:${C.chainId}:${V2.badges}:${me}`;
+    const seen = new Set(JSON.parse(localStorage.getItem(seenKey) || "[]"));
+    const fresh = own ? earned.filter(([, , id]) => !seen.has(String(id))) : [];
     const art = await Promise.all(earned.map(async ([k, th, id]) => {
       const json = JSON.parse(atob((await c.badges.tokenURI(id)).split(",")[1]));
-      return `<figure class="trophy"><img src="${json.image}" alt="${esc(json.name)}" width="120" height="120"><figcaption><strong>${th}h ${esc(k === 0 ? "total" : CATS[k - 1])}</strong><span>Token #${id} · soulbound</span></figcaption></figure>`;
+      const isNew = fresh.some(([, , f]) => f === id);
+      return `<figure class="trophy${isNew ? " unlocked" : ""}"><img src="${json.image}" alt="${esc(json.name)}" width="120" height="120"><figcaption><strong>${label(k, th)}</strong><span>Token #${id} · soulbound${isNew ? ' · <em class="new-tag">new</em>' : ""}</span>
+        ${own ? `<button type="button" class="btn btn-ghost sm" data-renounce="${id}" data-label="${label(k, th)}">Renounce</button>` : ""}</figcaption></figure>`;
     }));
+    const ren = renounced.map(([k, th]) => `<figure class="trophy renounced"><div class="goal-ring" aria-hidden="true"></div><figcaption><strong>${label(k, th)}</strong><span>Earned · renounced by you</span>
+      <button type="button" class="btn btn-ghost sm" data-reclaim="${k}:${th}">Reclaim</button></figcaption></figure>`);
+    if (own) localStorage.setItem(seenKey, JSON.stringify(earned.map(([, , id]) => String(id))));
+    fresh.forEach(([k, th]) => toast(`Badge unlocked: ${label(k, th)}`, "ok"));
     // next goals: the next total milestone and the next one in every area already started (outlines, not art)
     const goals = [];
     const nt = nextOf(total, TOTAL_T);
     if (nt) goals.push([`${nt}h total`, nt - total]);
     catH.forEach((h, i) => { const n = nextOf(h, CAT_T); if (h > 0 && n) goals.push([`${n}h ${CATS[i]}`, n - h]); });
-    $("ppVault").innerHTML = (art.length ? art.join("") : `<p class="muted small vault-empty">No badges yet. The first one is minted on-chain at 10 verified hours.</p>`) +
+    $("ppVault").innerHTML = (art.length || ren.length ? art.join("") + ren.join("") : `<p class="muted small vault-empty">No badges yet. The first one is minted on-chain at 10 verified hours.</p>`) +
       goals.map(([label, left]) => `<figure class="trophy goal" aria-label="Not earned yet"><div class="goal-ring" aria-hidden="true"></div><figcaption><strong>${label}</strong><span>Not earned yet · ${left}h to go</span></figcaption></figure>`).join("");
+    $("vaultForm").querySelector(".msg").className = "msg";
+    $("vaultForm").querySelector(".msg").textContent = "";
   }
+
+  $("ppVault").onclick = (e) => {
+    const r = e.target.closest("[data-renounce]"), rc = e.target.closest("[data-reclaim]"), form = $("vaultForm");
+    if (r) confirmCard(form, `<p><strong>Renounce "${esc(r.dataset.label)}"?</strong> The badge is burned now and won't be minted to this wallet again unless you reclaim it. Your verified hours don't change.</p>`,
+      "Renounce badge", () => send(form, "renounce", () => [r.dataset.renounce], badgesTarget).then(after(loadPassport)));
+    if (rc) {
+      const [k, th] = rc.dataset.reclaim.split(":").map(Number);
+      // two transactions: clear the renounced flag, then ask the ledger to re-mint (anyone may call resyncBadges)
+      send(form, "reclaim", () => [k, th], badgesTarget).then((ok) => ok && send(form, "resyncBadges", () => [vaultOwner], ledgerTarget)).then(after(loadPassport));
+    }
+  };
+  $("ppShare").onclick = async () => {
+    if (!vaultOwner) return toast("Connect a wallet first.", "err");
+    const link = `${location.origin}${location.pathname}${location.search}#passport=${vaultOwner}`;
+    try { await navigator.clipboard.writeText(link); toast("Public passport link copied. It shows only public on-chain data.", "ok"); }
+    catch { toast(link, "info"); }
+  };
 
   async function renderRecords(c, me) {
     const [ids] = await c.ledger.originalsOf(me, 0, 100);
-    if (!ids.length) return ($("ppRecords").innerHTML = `<li class="muted small">No records yet. Hours appear here once an NGO issues them to this wallet.</li>`);
+    if (!ids.length) { $("ppRecords").innerHTML = `<li class="muted small">No records yet. Hours appear here once an NGO issues them to this wallet.</li>`; return []; }
+    const heads = [];
     const rows = await Promise.all(ids.map(async (id) => {
       const h = await c.ledger.headOf(id);
+      heads.push({ hours: Number(h.entryType) === 2 ? 0 : Number(h.hoursLogged), serviceDay: Number(h.serviceDay) });
       const [ev, org] = await Promise.all([h.eventId ? c.ledger.getFunction("getEvent")(h.eventId) : null, c.ledger.getOrg(h.orgId)]);
       const t = Number(h.entryType);
       const status = t === 2 ? ["bad", "Revoked"] : t === 1 ? ["warn", "Corrected"] : t === 3 ? ["neutral", "From V1"] : ["ok", "Valid"];
@@ -137,6 +258,7 @@
         <span class="ir-proof">${ENTRY2[t]}${h.reason !== ethers.ZeroHash ? " · " + esc(ethers.decodeBytes32String(h.reason)) : ""}</span></li>`;
     }));
     $("ppRecords").innerHTML = rows.join("");
+    return heads;
   }
 
   // ---------- Issuance ----------
@@ -634,7 +756,6 @@
   PAGE_LOAD.checkin = () => { loadCheckin().catch((e) => toast(declined(e), "err")); };
   PAGE_LOAD.opps = () => { loadOpps().catch((e) => { logError("opportunities", e); $("opList").innerHTML = `<li class="msg err">${esc(declined(e))}</li>`; }); };
   window.addEventListener("hashchange", v2FromHash);
-  v2FromHash();
   // the sidebar's "My passport" always means your own wallet
   document.querySelector('.nav-item[data-page="passport"]').addEventListener("click", () => { if (viewAddr) { viewAddr = null; history.replaceState(null, "", location.pathname + location.search); loadPassport(); } });
   if (!$("shStart").value) { const d = new Date(); d.setMinutes(0, 0, 0); $("shStart").value = localInput(d); d.setHours(d.getHours() + 3); $("shEnd").value = localInput(d); }
@@ -647,4 +768,5 @@
     if (!$("attend").hidden) loadAttendance();
     if (!$("checkin").hidden) loadCheckin();
   });
+  v2FromHash(); // last: every page loader above must be registered first (direct #passport= / #checkin= links)
 })();

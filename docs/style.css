@@ -762,3 +762,55 @@ button.omni-item:hover, button.omni-item:focus-visible { background: var(--hover
   .op { grid-template-columns: 1fr; }
   .op-spots { justify-items: start; }
 }
+
+/* ============ 16. V2: progress (Stage 4) ============ */
+.head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s4); }
+.seg { display: inline-flex; flex: none; padding: 2px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--raised); }
+.seg button { height: 26px; padding: 0 12px; border: 0; border-radius: 4px; background: transparent; color: var(--text-3); font: 500 12.5px var(--font); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--hover); color: var(--text); }
+.game { display: flex; flex-direction: column; gap: var(--s4); }
+.game-hero { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: var(--s5); align-items: center; padding: var(--s5); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--raised); }
+.companion { display: grid; justify-items: center; gap: 4px; font-size: 11.5px; color: var(--text-3); }
+.companion svg { width: 104px; height: 104px; fill: none; stroke: var(--text-3); stroke-width: 2; stroke-linecap: round; }
+.companion .fill { fill: var(--ok-soft); stroke: var(--ok); }
+.companion .fruit { fill: #e2a640; stroke: none; }
+.game-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--s4); }
+.gs { display: grid; gap: 4px; align-content: start; min-width: 0; }
+.gs > span { font-size: 12px; color: var(--text-3); display: flex; align-items: center; gap: 6px; }
+.gs strong { font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
+.gs small { font-size: 12px; color: var(--text-3); line-height: 1.45; }
+.gs small a { color: var(--text-2); }
+.quest { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+.quest li { display: flex; align-items: center; gap: var(--s3); font-size: 13px; color: var(--text-2); }
+.quest li svg { width: 16px; height: 16px; flex: none; fill: none; stroke: var(--ok); stroke-width: 2; }
+.quest li.done > span:not(.badge) { color: var(--text-3); text-decoration: line-through; }
+.q-dot { width: 14px; height: 14px; margin: 1px; flex: none; border-radius: 50%; border: 1.5px dashed var(--line-3); }
+.trees { display: grid; gap: var(--s3); }
+.tree { display: grid; grid-template-columns: 150px minmax(0, 1fr) 56px; gap: var(--s4); align-items: center; font-size: 13px; }
+.tree.c0 { --c: #4fc58c; } .tree.c1 { --c: #8a90f7; } .tree.c2 { --c: #f06363; } .tree.c3 { --c: #e2a640; } .tree.c4 { --c: #5bc0eb; }
+.tree-name { color: var(--text-2); }
+.tree-nodes { list-style: none; margin: 0; padding: 0; display: flex; align-items: center; }
+.tree-nodes li { flex: none; width: 36px; height: 24px; display: grid; place-items: center; border: 1px solid var(--line-2); border-radius: 99px; font: 500 10.5px var(--mono); color: var(--text-3); background: var(--bg); position: relative; }
+.tree-nodes li + li { margin-left: 18px; }
+.tree-nodes li + li::before { content: ""; position: absolute; right: 100%; width: 18px; height: 1px; background: var(--line-2); }
+.tree-nodes li.on { border-color: var(--c); color: var(--text); background: color-mix(in srgb, var(--c) 16%, var(--bg)); }
+.tree-nodes li.on + li.on::before { background: var(--c); }
+.tree-h { text-align: right; }
+.strip { list-style: none; margin: var(--s3) 0 0; padding: 0; display: grid; gap: 2px; }
+.strip li { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: var(--s3); padding: 6px var(--s3); border-radius: var(--r-sm); }
+.strip li.you { background: var(--hover); color: var(--text); font-weight: 500; }
+.trophy figcaption .btn { justify-self: center; margin-top: 4px; }
+.trophy.renounced { border-style: dashed; }
+.new-tag { font-style: normal; color: var(--ok); }
+.trophy.unlocked { animation: unlock 900ms var(--ease) both; }
+@keyframes unlock { 0% { transform: scale(.85); opacity: 0; box-shadow: 0 0 0 0 rgba(79, 197, 140, .5); } 60% { transform: scale(1.04); opacity: 1; box-shadow: 0 0 0 10px rgba(79, 197, 140, 0); } 100% { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .trophy.unlocked { animation: none; } }
+@media (max-width: 760px) {
+  .head-row { flex-direction: column; }
+  .game-hero { grid-template-columns: 1fr; justify-items: center; }
+  .tree { grid-template-columns: 1fr; gap: 6px; }
+  .tree-h { text-align: left; }
+  .tree-nodes li { width: 32px; }
+  .tree-nodes li + li { margin-left: 12px; }
+  .tree-nodes li + li::before { width: 12px; }
+}

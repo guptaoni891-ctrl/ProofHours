@@ -38,6 +38,8 @@ window.CONFIG = {
   v2: null,
   // V2 attendance service (shifts, QR check-in, approvals): not hosted anywhere public yet.
   attendance: null,
+  // Impact Twin: a labelled ESTIMATE of the value of volunteer time, for context only. Never money earned or paid.
+  impactRate: { perHour: 36.14, currency: "USD", label: "US national value of a volunteer hour, 2025 (Independent Sector, April 2026)", source: "https://independentsector.org/research/value-of-volunteer-time/" },
   // V2 indexer + search API: not hosted anywhere public yet.
   indexer: null,
   abi: [

@@ -7,7 +7,7 @@
   <meta name="description" content="ProofHours records community-service hours from accredited NGOs on a public ledger, so anyone can verify them in seconds.">
   <title>ProofHours · Verifiable volunteer records</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F4F4F5'/%3E%3Cpath d='M10 16.5l4 4 8-9' stroke='%2308090B' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=18">
+  <link rel="stylesheet" href="style.css?v=19">
 </head>
 <body data-view="landing">
 <a class="skip" href="#main">Skip to content</a>
@@ -229,7 +229,8 @@
 
     <!-- ================= V2: PASSPORT ================= -->
     <section id="passport" class="page" data-title="My passport" hidden>
-      <header class="page-head"><h2>My passport</h2><p>Your wallet-linked record: verified hours by impact area, the soulbound badges they have earned on-chain, and every entry behind them. Hours only come from accredited NGOs; nothing here can be self-reported.</p></header>
+      <header class="page-head head-row"><div><h2>My passport</h2><p>Your wallet-linked record: verified hours by impact area, the soulbound badges they have earned on-chain, and every entry behind them. Hours only come from accredited NGOs; nothing here can be self-reported.</p></div>
+        <div id="ppMode" class="seg" role="group" aria-label="View"><button type="button" data-mode="arcade" aria-pressed="true">Arcade</button><button type="button" data-mode="clean" aria-pressed="false">Clean</button></div></header>
       <div id="ppNotice" class="banner warn" hidden></div>
       <div id="ppBody" class="v2-body" hidden>
         <div id="ppPublic" class="banner" hidden></div>
@@ -239,10 +240,29 @@
           <div class="msg" role="alert"></div>
         </form>
         <div id="ppSummary" class="pp-summary"></div>
-        <section class="panel">
-          <div class="panel-head"><h3>Trophy Vault</h3><span class="hint">soulbound badges held by this wallet on this chain</span></div>
-          <div id="ppVault" class="vault"><p class="muted small">Connect a wallet to see its badges.</p></div>
+        <section id="ppGame" class="game" aria-label="Progress" hidden>
+          <div class="game-hero">
+            <div id="ppCompanion" class="companion" role="img"></div>
+            <div id="ppStats" class="game-stats"></div>
+          </div>
+          <div id="ppSpark" class="panel spark" hidden></div>
+          <div class="panel">
+            <div class="panel-head"><h3>Skill trees</h3><span class="hint">tiers at 10 · 50 · 100 · 250 · 500 verified hours per area; each tier is an on-chain badge</span></div>
+            <div id="ppTrees" class="trees"></div>
+          </div>
+          <form id="leagueForm" class="panel form-panel" hidden>
+            <div class="panel-head"><h3>League</h3><span class="hint">optional · this month's verified hours · shown by alias, never by wallet</span></div>
+            <div id="lgBody" class="small"></div>
+            <button type="submit" class="btn btn-ghost sm" id="lgBtn">Join or view my league</button>
+            <div class="msg" role="alert"></div>
+          </form>
         </section>
+        <form id="vaultForm" class="panel">
+          <div class="panel-head"><h3>Trophy Vault</h3><span class="hint">soulbound badges held by this wallet on this chain</span><button type="button" id="ppShare" class="btn btn-ghost sm">Copy public link</button></div>
+          <div id="ppVault" class="vault"><p class="muted small">Connect a wallet to see its badges.</p></div>
+          <button type="submit" hidden>Send</button>
+          <div class="msg" role="alert"></div>
+        </form>
         <section class="panel">
           <div class="panel-head"><h3>Records</h3><span class="hint">latest entry of each record</span></div>
           <ul id="ppRecords" class="impact-list"><li class="muted small">No records yet.</li></ul>
@@ -646,11 +666,12 @@
 </dialog>
 
 <script src="vendor/ethers.umd.min.js"></script>
-<script src="config.js?v=18"></script>
-<script src="demo-volunteers.js?v=18"></script>
-<script src="app.js?v=18"></script>
-<script src="v2-abi.js?v=18"></script>
+<script src="config.js?v=19"></script>
+<script src="demo-volunteers.js?v=19"></script>
+<script src="app.js?v=19"></script>
+<script src="v2-abi.js?v=19"></script>
 <script src="vendor/qrcode.js"></script>
-<script src="v2.js?v=18"></script>
+<script src="progress.js?v=19"></script>
+<script src="v2.js?v=19"></script>
 </body>
 </html>
