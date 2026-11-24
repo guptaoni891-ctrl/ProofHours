@@ -63,6 +63,15 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
 | Trusting the index for verification | Verification (paste resolver, passports) reads the chain directly, never the index | design |
 | Abuse | Read-only API on 127.0.0.1; **no rate limiting yet** | open |
 
+### Progress and leagues (Stage 4)
+| Threat | Mitigation | Evidence |
+|---|---|---|
+| Inflating progress | Every figure is computed from ledger data; no input path exists | S-PROG; E2E-GAME revocation lowers level, streak and Polymath |
+| Being ranked without consent | Only wallets in the league table are ranked; joining needs a signed session and an on-chain opt-in; leaving deletes the row | S-ATT league test |
+| Identifying league members | Generated aliases (no free text); wallets never in responses; only 3 above and 3 below returned | S-ATT; E2E-GAME |
+| Showing renounced badges publicly | Renounced badges are shown to the holder only | design; E2E-GAME public passport has no vault controls |
+| Estimates read as money | Impact Twin always labelled an estimate and "not money earned, paid or owed", with its source | E2E-GAME |
+
 ## 4. Static analysis
 - **Forge lint:** run. Findings triaged:
   - `unsafe-typecast`: `uint64(block.timestamp)` and `uint32(block.timestamp / 1 days)` can't truncate for millions of years.

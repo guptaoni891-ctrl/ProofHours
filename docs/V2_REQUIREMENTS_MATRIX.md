@@ -34,12 +34,12 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 
 | ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| M1.1 | Impact XP and hero strip: verified lifetime hours, civic level, streak with freeze shields, badge count | P1 | V1 My Impact; L totals | Passport hero: total hours ✓, badge count via vault ✓; level, XP and streak to add | Streak and level computed from indexed records | L `totalHours`, `categoryHours` ✓ | Record timestamps | M11 indexer (streaks) | E2E-V2 passport total ✓; streak unit tests (todo) | In Progress |
+| M1.1 | Impact XP and hero strip: verified lifetime hours, civic level, streak with freeze shields, badge count | P1 | V1 My Impact; L totals | Passport progress strip: civic level with progress bar, weekly streak, freeze shields, Polymath, Impact Twin ✓ | None needed: computed in the page from the ledger's latest entries (`docs/progress.js`) | L `totalHours`, `categoryHours`, `headOf` ✓ | none | none | Level curve and streak rules unit-tested ✓ (S-PROG); E2E-GAME level 4 / streak 4 wk / shield, and all drop after a revocation ✓ | Tested (local) |
 | M1.2 | Next-milestone quest bar, exact hours to the next automated mint | P1 | V1 My Impact bar | Passport total milestone bar and per-area bars ✓ | none | B thresholds ✓ | none | none | E2E-L My Impact 50%, E2E-V2 milestone ✓ | Tested |
 | M1.3 | Active mission and shift feed matched by category, distance, skills | P1 | none | Opportunities page: upcoming shifts with area facets, NGO filter, spots left ✓ | Attendance service `GET /opportunities` (public, no attendee data) ✓ | none | Shift DB | M2, M5 | Feed shows only open, real shifts ✓ (ended shifts and suspended NGOs left out; E2E-DISC); distance and skills matching not built | In Progress |
-| M1.4 | Badge unlock vault: real SBTs, art, mint tx, share | P1 | none | Trophy Vault reads real tokens and on-chain art ✓; unlock animation and share to add | none | B `tokenOfKey`, `tokenURI` ✓ | none | M8.2 for sharing | E2E-V2 vault shows 2 minted badges, no fake ones ✓ | In Progress |
+| M1.4 | Badge unlock vault: real SBTs, art, mint tx, share | P1 | none | Real tokens and on-chain art ✓; unlock animation once per badge per browser (off with reduced motion) ✓; "Copy public link" ✓ | none | B `tokenOfKey`, `tokenURI` ✓ | none | M8.2 | E2E-GAME: 5 badges animate on first view only ✓. Mint-transaction link not shown (needs the indexer to track badge mints) | In Progress |
 | M1.5 | Wallet-linked volunteer identity | P1 | none | Passport tied to the connected wallet ✓ | Smart-account and passkey adapters (Stage 6) | L `optIn` ✓, V1 linking ✓ | none | none | F-V2 opt-in tests ✓, E2E-V2 ✓ | In Progress |
-| M1.6 | Impact Companion avatar grows with verified hours (§7, App. A #1) | P1 | none | Avatar from verified totals, arcade only | none | none | none | M1.1 | Grows only from verified hours | Not Started |
+| M1.6 | Impact Companion avatar grows with verified hours (§7, App. A #1) | P1 | none | Five-stage plant (Seed → Grove keeper) by civic level, Arcade view only ✓ | none | none | none | M1.1 | Grows only from verified hours ✓ (S-PROG, E2E-GAME) | Tested (local) |
 | M1.7 | Loading, empty and error states | P1 | Design system | Every V2 screen has honest empty, loading and not-deployed states ✓ | none | none | none | none | E2E-V2 "not deployed on Base Sepolia" ✓ | Tested |
 
 ## M2: Proof-of-service and attendance
@@ -58,7 +58,7 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 | ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
 | M3.1 | Shareable public passport: lifetime hours by area, issuers, SBTs | P1 | Passport ✓ | Public read-only view at `#passport=0x…` (from search or a pasted wallet): totals, badges, records; no opt-in or V1-link forms ✓ | Optional profile handle (opt-in) not built | L, B views ✓ | none | M9.3 consent | Shows only public on-chain data ✓ (E2E-DISC); handles and per-category disclosure need M9.3 | In Progress |
-| M3.2 | Dual-mode toggle: Arcade and Verifier Clean | P1 | V1 print report ✓ | Clean institutional mode | none | none | none | none | Same data in both modes | In Progress (print view only) |
+| M3.2 | Dual-mode toggle: Arcade and Verifier Clean | P1 | V1 print report ✓ | Passport Arcade/Clean toggle, remembered per browser; public passports open in Clean ✓ | none | none | none | none | Same verified data in both modes ✓ (E2E-GAME) | Tested (local) |
 | M3.3 | One-click proof drawer: issuer, timestamp, explorer link, status | P1 | V1 verify evidence ✓ | V2 per-record drawer with tx link | Indexer supplies tx hashes | L events ✓ | none | M11 | Every hour and badge links to its tx | In Progress |
 | M3.4 | Endorsements and skill graph co-signed by supervisors | P2 | none | Skill tags | Signed endorsements | Optional | OB3 skill assertions | M8.2 | Endorsement verifies to the NGO signer | Not Started |
 | M3.5 | Correction and revocation history | P1 | V1 trail ✓; L chain ✓ | Passport shows latest entry and reason ✓; full trail view to add | none | L `supersededBy` / `replacesId` ✓ | none | none | Corrections update totals ✓ (F-V2) | In Progress |
@@ -68,15 +68,15 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 
 | ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| M4.1 | Skill trees: Environmental, Education, Healthcare, Emergency, Inclusion; tiers 10/50/100/250/500 | P1 | B category badges ✓ | Tree visual per area | none | B category milestones ✓ | none | none | Category badges minted at each tier ✓ (F-V2) | In Progress |
-| M4.2 | 30-person opt-in cohort leagues, seasonal resets, fair grouping, private opt-out | P1 | none | League panel (hidden in verifier mode) | League service on rolling 30-day verified hours | none | Opt-in flag | M11, M9.3 | Non-opted-in users never ranked | Not Started |
-| M4.3 | Near-me rival strip (3 above, 3 below) | P1 | none | Strip | From league data | none | none | M4.2 | Never shows full lists | Not Started |
-| M4.4 | Co-op guild and campus quests; collective milestone art | P1 | none | Quest panel | Guild membership, aggregates | Optional group SBT | none | M11 | Only verified member hours count | Not Started |
-| M4.5 | Impact Twin factual equivalents, clearly labelled estimates | P1 | none | Fun-fact card | Benchmark rates (configurable, sourced) | none | Independent Sector rate | none | Always labelled "estimate", never a payment | Not Started |
-| M4.6 | Streak Freeze shields | P1 | none | Streak UI | Streak rules | none | none | M1.1 | Freeze rules deterministic | Not Started |
-| M4.7 | Unsung Hero cosmetic drops (surprise, arcade only) | P1 | none | Profile frames | Eligibility from shift metadata | none | none | M2 | Cosmetic only, no hours | Not Started |
-| M4.8 | Anti-hour-farming: 12h/day cap with emergency override, Polymath prestige, supervisor-signed upper tiers | P1 | none | Refusal messages ✓ | Polymath calculation | L `DAILY_CAP`, `EMERGENCY_DAILY_CAP` ✓, per-NGO cap ✓ | none | M3.4 (upper tiers) | Cap enforced in contract ✓ (F-V2, E2E-V2) | In Progress |
-| M4.9 | Competition optional; gamification can't be advanced with fabricated hours | P1 | none | Opt-in toggles | none | Totals only from NGO issuance or approved V1 imports ✓ | none | none | No self-reported path exists ✓ (F-V2) | In Progress |
+| M4.1 | Skill trees: Environmental, Education, Healthcare, Emergency, Inclusion; tiers 10/50/100/250/500 | P1 | B category badges ✓ | Tree per area with reached tiers ✓ | none | B category milestones ✓ | none | none | Tiers follow verified hours, including after a revocation ✓ (S-PROG, E2E-GAME) | Tested (local) |
+| M4.2 | 30-person opt-in cohort leagues, seasonal resets, fair grouping, private opt-out | P1 | none | League panel on your own passport (Arcade view), join and leave ✓ | Service: opt-in table; generated aliases; cohorts of ≤30 within lifetime-hours bands; monthly seasons scored on verified hours served that month ✓ | none | Opt-in record (wallet, alias, join time) | M9.3 | Non-members never ranked; leaving removes you everywhere; no wallets in responses ✓ (S-ATT, E2E-GAME) | Tested (local) |
+| M4.3 | Near-me rival strip (3 above, 3 below) | P1 | none | Strip with ranks, aliases, hours, "you" marked ✓ | Only the 3 above and 3 below are returned ✓ | none | none | M4.2 | Never shows full lists ✓ (S-ATT) | Tested (local) |
+| M4.4 | Co-op guild and campus quests; collective milestone art | P1 | none | none | none | Optional group SBT | none | M9.3 | Only verified member hours count | **Deferred** to Stage 5: guild membership needs a consent store (the consent vault) before members' hours can be pooled |
+| M4.5 | Impact Twin factual equivalents, clearly labelled estimates | P1 | none | Card: hours × US$36.14/h, labelled "estimate", "not money earned, paid or owed", with source link ✓ | none | none | Independent Sector 2025 national value of a volunteer hour (configurable in `config.js` → `impactRate`) | none | Always labelled an estimate, never a payment ✓ (E2E-GAME). Physical equivalents (trees planted etc.) not added: no sourced per-area rates | In Progress |
+| M4.6 | Streak Freeze shields | P1 | none | Streak and shields on the progress strip ✓ | Weekly rule: active week = verified service that week; a shield every 4th consecutive active week (max 2); a missed week uses one ✓ | none | none | M1.1 | Freeze rules deterministic and order-independent ✓ (S-PROG) | Tested (local) |
+| M4.7 | Unsung Hero cosmetic drops (surprise, arcade only) | P1 | none | none | none | none | none | M2 | Cosmetic only, no hours | **Deferred:** needs eligibility signals (hard-to-fill shifts) from more attendance history |
+| M4.8 | Anti-hour-farming: 12h/day cap with emergency override, Polymath prestige, supervisor-signed upper tiers | P1 | none | Refusal messages ✓; Polymath title (3 areas at 10h+; II at 5) ✓ | Polymath computed from verified category hours ✓ | L `DAILY_CAP`, `EMERGENCY_DAILY_CAP` ✓, per-NGO cap ✓ | none | M3.4 (upper tiers) | Cap enforced in contract ✓; Polymath follows revocations ✓ (E2E-GAME). Polymath is a computed title, not an on-chain badge; supervisor-signed tiers need M3.4 | In Progress |
+| M4.9 | Competition optional; gamification can't be advanced with fabricated hours | P1 | none | Leagues opt-in; Clean view hides all game elements ✓ | none | Totals only from NGO issuance or approved V1 imports ✓ | none | none | No self-reported path ✓ (F-V2); every progress figure derives from ledger data ✓ (S-PROG, E2E-GAME revocation test) | Tested (local) |
 
 ## M5: Search and discovery
 
@@ -117,7 +117,7 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 |---|---|---|---|---|---|---|---|---|---|---|
 | M8.1 | Milestone auto-mint: totals 10/25/50/100/250/500, categories 10/50/100/250/500, ERC-5192 locked, ERC-165 ids, no transfer path, duplicate prevention | P1 | none | Trophy Vault ✓ | none | B ✓ | none | none | F-V2: interfaces, every transfer path reverts, 500h mints all, invariant: badge ⇔ eligibility ✓ | Tested (local chain); Base Sepolia deployment Blocked (approval) |
 | M8.2 | Correction and revocation lifecycle: burn when hours fall below, re-mint on re-cross | P1 | none | Vault updates ✓ | none | B `_reconcile` ✓ | none | none | F-V2, E2E-V2 burn after correction ✓ | Tested (local chain) |
-| M8.3 | ERC-5484 consensual: `burnAuth` = Both, consent before mint, holder renounce/reclaim | P1 | none | Renounce UI to add | none | B `burnAuth`, `renounce`, `reclaim`; L `optIn` ✓ | none | none | F-V2 renounce/reclaim ✓ | In Progress (UI) |
+| M8.3 | ERC-5484 consensual: `burnAuth` = Both, consent before mint, holder renounce/reclaim | P1 | none | Renounce (with confirmation) and Reclaim in the vault; reclaim re-mints via `resyncBadges` ✓ | none | B `burnAuth`, `renounce`, `reclaim`; L `optIn`, `resyncBadges` ✓ | none | none | F-V2 ✓; E2E-GAME renounce burns, reclaim re-mints, hours unchanged ✓ | Tested (local) |
 | M8.4 | Dynamic evolving badge artwork | P1 | none | Vault renders on-chain SVG ✓ | none | B on-chain JSON + SVG (tier ring) ✓ | none | none | F-V2 `tokenURI` decodes ✓ | Tested |
 | M8.5 | Pinned immutable assets (IPFS) | P1 | none | none | none | none | none | Stage 5 | CID stable | **Deferred:** nothing needs pinning yet (badge art is generated on-chain). Built with OB3 evidence in Stage 5 |
 | M8.6 | Open Badges 3.0 / W3C VC 2.0 credential generation and validation, Status List, LinkedIn sharing | P2 | none | Export and share | Issuer key (KMS) / DID, signer, status list | none | 1EdTech validator | Stage 5 | OB3 validates; revocation reflected | Not Started |
@@ -176,7 +176,7 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 | X6.3 | Presets: Volunteer Arcade, Institutional Verifier, NGO Coordinator, Auditor Forensic | P1 | Not Started |
 | X6.4 | Deliberately excluded: tradable NFTs, global all-time leaderboards, unverified hours in totals, strobing animation | P1 | Implemented (none exist; badges are soulbound) |
 | X7.1 | No monetary or tradable rewards | P1 | Implemented |
-| X7.2 | Endowed progress (start partway to "First Spark") | P1 | Not Started |
+| X7.2 | Endowed progress (start partway to "First Spark") | P1 | Tested (local): First Spark quest where opting in is a real first step (1 of 3 done), so no fabricated progress |
 | X9.1 | WCAG 2.2 AA contrast, 24×24 px targets (44 px on touch), visible focus | P1 | In Progress (tokens ≥ 4.5:1, focus rings ✓; a full axe audit is outstanding) |
 | X9.2 | `prefers-reduced-motion` | P1 | Implemented |
 | X9.3 | English / Arabic with RTL from day one | P1 | Not Started (Stage 6) |
@@ -189,14 +189,14 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 
 | # | Idea | Overlaps | Candidate stage | Status |
 |---|---|---|---|---|
-| 1 | Impact Companion avatar | M1.6 | 4 | Not Started |
-| 2 | Co-op campus / guild boss quests | M4.4 | 4 | Not Started |
-| 3 | 30-person tiered leagues | M4.2 | 4 | Not Started |
-| 4 | Civic Receipt share card (labelled estimate) | M4.5 | 4 | Not Started |
-| 5 | Streak Freeze shields | M4.6 | 4 | Not Started |
-| 6 | Unsung Hero drops | M4.7 | 4 | Not Started |
-| 7 | Polymath all-rounder badge | M4.8 | 4 (needs a contract tier) | Not Started |
-| 8 | Near-me rival strip | M4.3 | 4 | Not Started |
+| 1 | Impact Companion avatar | M1.6 | 4 | Tested (local) |
+| 2 | Co-op campus / guild boss quests | M4.4 | 5 | Deferred (needs consent store) |
+| 3 | 30-person tiered leagues | M4.2 | 4 | Tested (local) |
+| 4 | Civic Receipt share card (labelled estimate) | M4.5 | 4 | In Progress (Impact Twin estimate; share card not built) |
+| 5 | Streak Freeze shields | M4.6 | 4 | Tested (local) |
+| 6 | Unsung Hero drops | M4.7 | later | Deferred |
+| 7 | Polymath all-rounder badge | M4.8 | 4 (needs a contract tier) | In Progress (computed title; not an on-chain badge) |
+| 8 | Near-me rival strip | M4.3 | 4 | Tested (local) |
 | 9 | Rotating 90 s HMAC-QR gate | M2.1 | 2 | Tested (local; 30 s rotation, ≤ 60 s validity) |
 | 10 | Geofence boolean proof | M2.2 | 2 | Tested (local) |
 | 11 | Anomaly radar | M7.1 | 5 | Not Started |
@@ -213,7 +213,7 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 | 22 | Volunteers.ae and LMS export adapter | M10 | 5 | Blocked (partner formats) |
 | 23 | Returning-volunteer retention radar | none | later | Not Started |
 | 24 | No-show predictor and waitlist | none | later | Not Started |
-| 25 | Arcade ⇄ Verifier Clean skin switch | M3.2 | 5 | In Progress |
+| 25 | Arcade ⇄ Verifier Clean skin switch | M3.2 | 4 | Tested (local, passport) |
 | 26 | Category cloaking and selective disclosure | M9.3 | 5 | Not Started |
 | 27 | One-click erasure (crypto-shredding) | M9.2 | 5 | Not Started |
 | 28 | ERC-5484 burn and guardian recovery | M8.3, wallet recovery | 6 | In Progress (burn ✓) |

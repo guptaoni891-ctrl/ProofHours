@@ -83,6 +83,24 @@ Reads: public RPCs with failover (Base Sepolia) or a local fork (`?local`). Writ
 ### Paste-to-verify and public passports
 Pasted wallets, transaction hashes, `record N`, `badge N` and verification links are resolved **in the browser from the chain**, so they work on any network without a service. A wallet opens its public passport (`#passport=0x…`), which shows only public on-chain data.
 
+### Progress rules (`docs/progress.js`, Stage 4)
+Pure functions shared by the page and the tests. Inputs are only the ledger's totals and the latest entry of each record (revoked = 0 hours), so nothing a volunteer does can raise them, and corrections or revocations lower them at once.
+
+| Rule | Definition |
+|---|---|
+| Civic level | Reaching level *n* takes 5·n·(n−1)/2 verified hours (L2 5h, L3 15h, L4 30h, L5 50h, L10 225h). |
+| Weekly streak | Weeks start Monday (UTC). A week is active with at least one verified, non-revoked V2 record served in it (V1 imports have no service day and don't count). The current week never breaks a streak. |
+| Freeze shields | One per 4th consecutive active week, at most 2; a missed week uses one (the streak survives without growing), otherwise the streak resets. |
+| Skill trees | Tiers 10/50/100/250/500 per area, the same thresholds as the on-chain category badges. |
+| Polymath | Computed title: 10h+ in 3 areas (Polymath) or all 5 (Polymath II). Not an on-chain badge. |
+| Impact Companion | Plant stage by civic level (1, 2, 4, 7, 10). |
+| Impact Twin | hours × a configured, sourced rate (Independent Sector's US$36.14/h for 2025), always labelled an estimate and never a payment. |
+| First Spark | Opt in → first verified hour → 10 verified hours. Opting in is a real first step, so newcomers start with progress that isn't fabricated. |
+
+**Leagues** live in the attendance service (it already has wallet sign-in): opt-in table, generated aliases, cohorts of ≤30 within lifetime-hours bands (under 10h, 10–49h, 50–249h, 250h+), monthly seasons scored on verified hours served that month (read from the ledger), and only the 3 above and 3 below returned.
+
+**Arcade / Clean:** the passport's game layer is hidden in Clean view (the choice is remembered per browser); public passports open in Clean.
+
 ## 4. Target architecture (Stages 3–6)
 
 ### Decisions recorded in Stage 3
