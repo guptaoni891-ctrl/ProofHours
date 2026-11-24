@@ -47,16 +47,7 @@ function toast(text, kind = "info") {
   setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 260); }, 4500);
 }
 
-function countUp(el, to) {
-  if (REDUCED_MOTION) return (el.textContent = to.toLocaleString());
-  const t0 = performance.now();
-  const step = (t) => {
-    const p = Math.min(1, (t - t0) / 700);
-    el.textContent = Math.round(to * (1 - (1 - p) ** 3)).toLocaleString();
-    if (p < 1) requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-}
+const countUp = (el, to) => (el.textContent = to.toLocaleString());
 
 // ---------- Read-only provider: try each RPC in order ----------
 const rpcOverride = params.get("rpc");
@@ -67,6 +58,20 @@ const reader = () => (readerPromise ??= connectReader());
 const makeProvider = (url) => new ethers.JsonRpcProvider(url, C.chainId, { staticNetwork: true, batchMaxCount: 1 });
 
 let readCode = "0x"; // contract bytecode on the chain the page reads (shown on the Network page)
+// Public RPCs time out, rate-limit or drop (408/429/5xx/offline). Those are "transport" errors, not answers.
+const isTransport = (e) => ["SERVER_ERROR", "TIMEOUT"].includes(e?.code) || /Failed to fetch|server response (408|429|5\d\d)|timeout/i.test(e?.message ?? "");
+// Move the failing RPC to the back of the list and reconnect, so the next read uses another public RPC.
+function rotateReader() {
+  const i = rpcList.indexOf(activeRpc);
+  if (i >= 0 && rpcList.length > 1) rpcList.push(rpcList.splice(i, 1)[0]);
+  readerPromise = null;
+}
+// Runs a read; on a transport error it switches RPC and retries once. Real contract answers are never retried.
+async function withRead(fn) {
+  try { return await fn(await reader()); }
+  catch (e) { if (!isTransport(e)) throw e; console.warn("read failed on", activeRpc, "- switching RPC", e); rotateReader(); return fn(await reader()); }
+}
+
 async function connectReader() {
   for (const url of rpcList) {
     let p, code, chain;
@@ -136,6 +141,7 @@ function friendly(e) {
   if (e?.code === "CALL_EXCEPTION") return "Refused by the contract (no reason was returned). Check you are using the right wallet and record number.";
   if (e?.code === "BAD_DATA") return "No contract answered at the configured address on this network. Check the address in config.js.";
   if (e?.code === "NETWORK_ERROR") return `Your wallet changed network. Click "Switch to ${C.netName}" and try again.`;
+  if (isTransport(e)) return `The ${C.netName} network service didn't respond in time. Nothing was changed. Please try again in a moment.`;
   if (e?.code === "UNKNOWN_ERROR") {
     // ethers' "could not coalesce error": the wallet's own message is nested inside
     const inner = e.error?.data?.message || e.error?.message || "no details";
@@ -226,7 +232,7 @@ function renderWallet() {
   $("cOrg").textContent = isCoord ? orgLabel : "—";
   $("cWallet").textContent = account ? short(account) : "Not connected";
   $("aWallet").textContent = account ? short(account) : "Not connected";
-  $("aRole").innerHTML = `<span class="badge ${{ admin: "warn", coord: "ok", unauth: "bad", none: "neutral" }[role]}">${text}</span>`;
+  $("aRole").innerHTML = `<span class="badge ${{ admin: "ok", coord: "ok", unauth: "bad", none: "neutral" }[role]}">${text}</span>`;
 }
 
 async function loadMyEvents(acct) {
@@ -294,6 +300,7 @@ async function send(form, fn, argsFn) {
     return receipt;
   } catch (e) {
     logError(`${fn} failed`, e);
+    if (isTransport(e)) rotateReader(); // so Retry uses another public RPC
     if (entry) { entry.status = "bad"; renderTxLists(); }
     msg.className = "msg err";
     msg.textContent = friendly(e) + (e?.preflight ? " Nothing was sent; your wallet was not asked to sign." : "");
@@ -335,8 +342,8 @@ const SNAPSHOT_MAX = 200;
 let snapshotPromise;
 const snapshot = () => (snapshotPromise ??= loadSnapshot().catch((e) => { snapshotPromise = null; throw e; }));
 
-async function loadSnapshot() {
-  const c = await reader();
+const loadSnapshot = () => withRead(snapshotWith);
+async function snapshotWith(c) {
   const [nRec, nEv] = (await Promise.all([c.recordCount(), c.eventCount()])).map(Number);
   // shortcut: reads the latest 200 entries and every event with view calls; add an indexer for real volume
   const recs = await Promise.all(range(Math.max(1, nRec - SNAPSHOT_MAX + 1), nRec).map((i) => c.getRecord(i)));
@@ -346,8 +353,26 @@ async function loadSnapshot() {
   return { nRec, nEv, recs, evs, owners, orgs };
 }
 
+// Landing preview: a real record (demo student S-002) read from the contract, not a mock.
+async function loadPreview() {
+  const box = $("lpPreview"), v = DEMO_VOLUNTEERS.find((d) => d.id === "S-002");
+  try {
+    const { results } = await lookupStudent(v.id, v.salt);
+    const r = results[0];
+    if (!r) return (box.innerHTML = `<p class="pv-empty">Demo record S-002 was not found on this network.</p>`);
+    const name = verdictOf(r.head);
+    box.innerHTML = `<div class="pv-query"><span>Student</span><code>S-002</code><span>Fingerprint</span><code>${short(r.head.volunteerCommitment)}</code></div>
+      <div class="pv-verdict ${VERDICT[name].cls}"><span class="status ${VERDICT[name].cls}">${name}</span><strong>${effectiveHours(r.head)}<small>verified hours</small></strong></div>
+      <dl class="pv-meta"><dt>Issuer</dt><dd>${esc(r.org.orgLabel)}</dd><dt>Event</dt><dd>${esc(r.ev.eventCode)}</dd></dl>
+      <ol class="pv-trail">${r.trail.map((t) => `<li><span class="mono">#${t.id}</span>${ENTRY_NICE[Number(t.entryType)]}<em>${Number(t.entryType) === 2 ? "revoked" : t.hoursLogged + "h"}</em></li>`).join("")}</ol>`;
+  } catch (e) {
+    box.innerHTML = `<p class="pv-empty">${esc(friendly(e))}</p>`;
+  }
+}
+
 async function loadOverview(force) {
   if (force) snapshotPromise = null;
+  if (force || !$("lpPreview").querySelector(".pv-verdict")) loadPreview();
   $("ovContract").innerHTML = `${C.address}<br>${links("address/" + C.address)}`;
   try {
     const s = await snapshot();
@@ -438,7 +463,7 @@ async function chainMatch(bp, attempts = 3) {
     } catch (e) {
       if (e?.code === "NO_CONTRACT" || e?.code === "WRONG_CHAIN") throw e;
       console.warn("chain check attempt failed", e);
-      readerPromise = null; // reconnect next attempt, moving on to the next public RPC if this one is down
+      rotateReader(); // reconnect next attempt on the next public RPC
     }
     if (i < attempts - 1) await new Promise((res) => setTimeout(res, 800 * (i + 1)));
   }
@@ -578,7 +603,9 @@ const SKELETON = `<div class="skeleton" aria-label="Checking the blockchain">
 
 // Every record for one student: its current head, full trail, event and issuing NGO. View calls only.
 async function lookupStudent(id, salt) {
-  const c = await reader();
+  return withRead((c) => lookupWith(c, id, salt));
+}
+async function lookupWith(c, id, salt) {
   const fp = fingerprint(salt, id);
   // shortcut: first 50 events per student; page with offset if a student ever has more
   const [ids] = await c.getRecordsByCommitment(fp, 0, 50);
@@ -605,7 +632,8 @@ async function verify() {
   out.innerHTML = SKELETON;
   try {
     const { fp, results } = await lookupStudent(id, salt);
-    out.innerHTML = `<div class="print-bar"><button type="button" class="btn btn-ghost sm" data-print>Print or save as PDF</button></div>` + renderVerify(id, fp, results, claimed);
+    out.innerHTML = `<div class="searched"><div><span>Searched</span><strong>${esc(id)}</strong><span>fingerprint</span><code title="${fp}">${short(fp)}</code><span>${results.length} ${results.length === 1 ? "record" : "records"}</span></div>
+      <button type="button" class="btn btn-ghost sm print-bar" data-print>Print or save as PDF</button></div>` + renderVerify(id, fp, results, claimed);
     $("printMeta").textContent = `Student ${id} · checked ${new Date().toLocaleString()} · contract ${C.address} · ${C.netName} (chain ${C.chainId})`;
     fillTxLinks(out);
   } catch (e) {
@@ -855,10 +883,11 @@ const navItems = [...document.querySelectorAll(".nav-item")];
 const PAGE_LOAD = { overview: () => loadOverview(), admin: loadAdmin, network: loadNetwork, coord: loadPicker };
 
 function showPage(name) {
+  document.body.dataset.view = name === "overview" ? "landing" : "app";
   document.querySelectorAll(".page").forEach((s) => (s.hidden = s.id !== name));
   navItems.forEach((b) => (b.dataset.page === name ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")));
   $("pageTitle").textContent = $(name).dataset.title;
-  document.title = `${$(name).dataset.title} · ProofHours`;
+  document.title = name === "overview" ? "ProofHours · Verifiable volunteer records" : `${$(name).dataset.title} · ProofHours`;
   setNav(false);
   window.scrollTo({ top: 0 });
   PAGE_LOAD[name]?.();
@@ -871,6 +900,7 @@ function setNav(open) {
 
 navItems.forEach((b) => (b.onclick = () => { showPage(b.dataset.page); $("main").focus({ preventScroll: true }); }));
 document.querySelectorAll("[data-goto]").forEach((b) => (b.onclick = () => showPage(b.dataset.goto)));
+document.querySelectorAll("[data-scroll]").forEach((b) => (b.onclick = () => $(b.dataset.scroll).scrollIntoView({ behavior: REDUCED_MOTION ? "auto" : "smooth", block: "start" })));
 $("menuBtn").onclick = () => setNav(!document.body.classList.contains("nav-open"));
 $("scrim").onclick = () => setNav(false);
 document.addEventListener("keydown", (e) => e.key === "Escape" && setNav(false));

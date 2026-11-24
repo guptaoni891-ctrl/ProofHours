@@ -4,43 +4,43 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>ProofHours · Verifiable Volunteer Impact</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233B82F6'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=10">
+  <meta name="description" content="ProofHours records community-service hours from accredited NGOs on a public ledger, so anyone can verify them in seconds.">
+  <title>ProofHours · Verifiable volunteer records</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F4F4F5'/%3E%3Cpath d='M10 16.5l4 4 8-9' stroke='%2308090B' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css?v=13">
 </head>
-<body>
+<body data-view="landing">
 <a class="skip" href="#main">Skip to content</a>
 
 <aside id="sidebar" class="sidebar" aria-label="Main navigation">
-  <div class="brand">
-    <div class="logo" aria-hidden="true">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>
-    </div>
-    <div><strong>ProofHours</strong><span>Verifiable Volunteer Impact</span></div>
-  </div>
+  <button type="button" class="brand" data-goto="overview" aria-label="ProofHours home">
+    <span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 12.5 3.2 3.2L17 8.8"/></svg></span>
+    <strong>ProofHours</strong>
+  </button>
 
   <nav class="nav">
-    <span class="nav-label">Platform</span>
-    <button class="nav-item" data-page="overview" aria-current="page">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Home</button>
+    <button class="nav-item" data-page="overview">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1Z"/></svg>Home</button>
+    <span class="nav-label">Public</span>
     <button class="nav-item" data-page="verify">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>Verify Hours<span class="nav-tag">No wallet</span></button>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 3 8.4 7 10 4-1.6 7-5.5 7-10V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>Verify a record</button>
     <button class="nav-item" data-page="impact">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>My Impact<span class="nav-tag">No wallet</span></button>
-    <span class="nav-label">Portals</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>My impact</button>
+    <span class="nav-label">Workspaces</span>
     <button class="nav-item" data-page="coord">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg>Coordinator Portal</button>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M8 2v4M16 2v4M8 11h8M8 15h5"/></svg>Coordinator</button>
     <button class="nav-item" data-page="admin">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Admin Portal</button>
-    <span class="nav-label">Audit &amp; Proof</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 11.5 18 13.5l3.5-4"/></svg>Admin</button>
+    <span class="nav-label">System</span>
     <button class="nav-item" data-page="demo">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z"/><path d="m14.5 9.5-5 5m0-5 5 5"/></svg>Security Demo</button>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Contract rules</button>
     <button class="nav-item" data-page="network">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>Network Status</button>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>Network status</button>
   </nav>
 
   <div class="sidebar-foot">
-    <div class="testnet"><span class="dot live" aria-hidden="true"></span><div><strong data-net>Base Sepolia testnet</strong><span>Chain <span data-chain>84532</span> · demo data only</span></div></div>
+    <div class="testnet"><span class="dot live" aria-hidden="true"></span><span><strong data-net>Base Sepolia</strong> · chain <span data-chain>84532</span></span></div>
+    <p>Testnet · fictional demo data</p>
   </div>
 </aside>
 <div id="scrim" class="scrim" aria-hidden="true"></div>
@@ -48,7 +48,7 @@
 <div class="shell">
   <header class="topbar">
     <button id="menuBtn" class="icon-btn menu" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
     <h1 id="pageTitle">Home</h1>
     <div class="top-actions">
@@ -56,106 +56,111 @@
       <button id="switchBtn" data-switch type="button" class="btn btn-warn sm" hidden>Switch to <span data-net>Base Sepolia</span></button>
       <span id="rolePill" class="pill" role="status">NO WALLET</span>
       <span id="addrChip" class="chip mono" hidden></span>
-      <button id="connectBtn" type="button" class="btn btn-primary sm">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12V8H6a2 2 0 0 1 0-4h12v4"/><path d="M4 6v12a2 2 0 0 0 2 2h14v-4"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>Connect Wallet</button>
+      <button id="connectBtn" type="button" class="btn btn-ghost sm">Connect wallet</button>
     </div>
   </header>
 
   <main id="main" tabindex="-1">
     <div id="netAlert" class="banner warn" role="alert" hidden></div>
-    <!-- ================= OVERVIEW ================= -->
-    <section id="overview" class="page" data-title="Home">
-      <div class="hero home-hero">
-        <div class="hero-copy">
-          <span class="eyebrow"><span class="dot live" aria-hidden="true"></span>Live on <span data-net>Base Sepolia</span> · testnet demo</span>
-          <h2>Every Hour Matters.<br><span class="grad">Every Hour Verified.</span></h2>
-          <p>Accredited NGOs sign volunteer hours onto a public blockchain. Anyone can check them in seconds, with no wallet and no account. Pick what you came to do.</p>
+    <!-- ================= LANDING ================= -->
+    <section id="overview" class="page landing" data-title="Home">
+      <header class="lnav">
+        <button type="button" class="brand" data-goto="overview" aria-label="ProofHours home">
+          <span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 12.5 3.2 3.2L17 8.8"/></svg></span>
+          <strong>ProofHours</strong>
+        </button>
+        <nav class="lnav-links" aria-label="Site">
+          <button type="button" data-goto="verify">Verify</button>
+          <button type="button" data-scroll="how">How it works</button>
+          <button type="button" data-scroll="workspaces">Workspaces</button>
+          <button type="button" data-goto="network">Network</button>
+        </nav>
+        <button type="button" class="btn btn-ghost sm" data-goto="verify">Open app</button>
+      </header>
+
+      <div class="lhero">
+        <div class="lhero-copy">
+          <p class="kicker"><span class="dot live" aria-hidden="true"></span>Live on Base Sepolia testnet</p>
+          <h2>Volunteer hours, verified.</h2>
+          <p class="lead">Accredited NGOs record community-service hours on a public ledger. Students keep a record that can't be quietly edited, and universities or employers confirm it in seconds, with no account and no wallet.</p>
+          <div class="lhero-actions">
+            <button type="button" class="btn btn-primary lg" data-goto="impact">Check your volunteer hours</button>
+            <button type="button" class="btn btn-ghost lg" data-goto="verify">Verify a record</button>
+          </div>
         </div>
+
+        <figure class="preview" aria-label="Live example from the contract">
+          <div class="pv-bar"><span></span><span></span><span></span><em>Verify a record</em></div>
+          <div class="pv-body" id="lpPreview">
+            <div class="pv-loading"><span class="spinner"></span>Reading demo record S-002 from the contract…</div>
+          </div>
+          <figcaption>A live record read from the contract just now: demo student S-002, fictional data.</figcaption>
+        </figure>
       </div>
 
-      <div class="roles" role="list">
-        <button type="button" class="role-card blue" data-goto="verify" role="listitem">
-          <span class="role-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></span>
-          <strong>Verify a student's hours</strong>
-          <span>For graduation auditors and employers. No wallet needed.</span>
-          <em>Start verifying →</em>
-        </button>
-        <button type="button" class="role-card green" data-goto="impact" role="listitem">
-          <span class="role-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg></span>
-          <strong>See my volunteer impact</strong>
-          <span>For volunteers. Your verified hours and next milestone, from your receipt.</span>
-          <em>Open my impact →</em>
-        </button>
-        <button type="button" class="role-card amber" data-goto="coord" role="listitem">
-          <span class="role-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg></span>
-          <strong>I'm an NGO coordinator</strong>
-          <span>Create events and record hours with your accredited wallet.</span>
-          <em>Go to coordinator portal →</em>
-        </button>
-        <button type="button" class="role-card coral" data-goto="admin" role="listitem">
-          <span class="role-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span>
-          <strong>I'm the university admin</strong>
-          <span>Accredit or remove NGO coordinator wallets.</span>
-          <em>Go to admin portal →</em>
-        </button>
-      </div>
-
-      <div class="metrics">
-        <div class="metric">
-          <div class="metric-top"><span>Verified hours</span><span class="metric-ico blue"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></div>
-          <strong id="mHours" class="metric-value">—</strong><span id="mHoursSub" class="metric-sub">Latest entries, revocations count as 0</span>
-        </div>
-        <div class="metric">
-          <div class="metric-top"><span>Volunteer records</span><span class="metric-ico cyan"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg></span></div>
-          <strong id="mRecords" class="metric-value">—</strong><span id="mRecordsSub" class="metric-sub">Original records issued</span>
-        </div>
-        <div class="metric">
-          <div class="metric-top"><span>Events</span><span class="metric-ico green"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span></div>
-          <strong id="mEvents" class="metric-value">—</strong><span class="metric-sub">Created by NGO coordinators</span>
-        </div>
-        <div class="metric">
-          <div class="metric-top"><span>Active NGOs</span><span class="metric-ico amber"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg></span></div>
-          <strong id="mOrgs" class="metric-value">—</strong><span class="metric-sub">Authorized NGOs that created events</span>
-        </div>
+      <div class="lstats" aria-label="Live figures from the contract">
+        <div><strong id="mHours">—</strong><span>verified hours</span><small id="mHoursSub">latest entries, revocations count as 0</small></div>
+        <div><strong id="mRecords">—</strong><span>volunteer records</span><small id="mRecordsSub">original records issued</small></div>
+        <div><strong id="mEvents">—</strong><span>events</span><small>created by NGO coordinators</small></div>
+        <div><strong id="mOrgs">—</strong><span>active NGOs</span><small>accredited and running events</small></div>
       </div>
       <p id="metricsNote" class="data-note">Loading live figures from the contract…</p>
 
-      <div class="grid-2">
-        <div class="panel">
-          <div class="panel-head"><h3>Recent on-chain activity</h3><button id="ovRefresh" type="button" class="btn btn-ghost sm">Refresh</button></div>
+      <section class="lsection" id="workspaces" aria-labelledby="wsTitle">
+        <div class="lsection-head"><h3 id="wsTitle">Pick up where you are</h3><p>Verification is public. Writing records needs a wallet the university has accredited.</p></div>
+        <div class="roles" role="list">
+          <button type="button" class="role-card" data-goto="verify" role="listitem">
+            <strong>Verify a record</strong><span>Graduation auditors and employers. No wallet needed.</span><em aria-hidden="true">→</em></button>
+          <button type="button" class="role-card" data-goto="impact" role="listitem">
+            <strong>My impact</strong><span>Volunteers. Your verified hours and next milestone, from your receipt.</span><em aria-hidden="true">→</em></button>
+          <button type="button" class="role-card" data-goto="coord" role="listitem">
+            <strong>Coordinator workspace</strong><span>Accredited NGOs. Create events, record and correct hours.</span><em aria-hidden="true">→</em></button>
+          <button type="button" class="role-card" data-goto="admin" role="listitem">
+            <strong>Admin workspace</strong><span>The university office. Accredit or remove NGO wallets.</span><em aria-hidden="true">→</em></button>
+        </div>
+      </section>
+
+      <section class="lsection" id="how" aria-labelledby="howTitle">
+        <div class="lsection-head"><h3 id="howTitle">How it works</h3><p>Four steps, each enforced by the contract rather than by this website.</p></div>
+        <ol class="flow">
+          <li><span class="flow-n">01</span><strong>The university accredits an NGO</strong><p>Its admin registers the coordinator's wallet. Writes from any other wallet are refused.</p></li>
+          <li><span class="flow-n">02</span><strong>The NGO records hours</strong><p>Only a salted fingerprint of the student ID is stored, never a name or a real ID.</p></li>
+          <li><span class="flow-n">03</span><strong>Mistakes become new entries</strong><p>A correction or revocation is appended. The original stays visible, so nothing is quietly rewritten.</p></li>
+          <li><span class="flow-n">04</span><strong>Anyone can verify</strong><p>The verifier's browser recomputes the fingerprint and reads the full history directly from the chain.</p></li>
+        </ol>
+      </section>
+
+      <section class="lsection split" aria-label="Data and activity">
+        <div>
+          <div class="lsection-head"><h3>What is public, and what is not</h3></div>
+          <div class="transparency">
+            <div><h4>On the ledger</h4><ul class="ticks">
+              <li>Accredited coordinator wallets and their names</li><li>Events and their maximum hours</li>
+              <li>Append-only records: hours, issuer, time, corrections</li><li>Salted fingerprints of student IDs</li></ul></div>
+            <div><h4>Never on the ledger</h4><ul class="ticks no">
+              <li>Student names or real IDs</li><li>The secret salts</li><li>Any other personal data</li></ul></div>
+          </div>
+        </div>
+        <div>
+          <div class="lsection-head row"><h3>Latest on-chain activity</h3><button id="ovRefresh" type="button" class="btn btn-ghost sm">Refresh</button></div>
           <ul id="activity" class="activity"><li class="skel"></li><li class="skel"></li><li class="skel"></li></ul>
         </div>
-        <div class="panel">
-          <div class="panel-head"><h3>How verification works</h3></div>
-          <ol class="flow">
-            <li><span class="flow-n">1</span><div><strong>University accredits an NGO</strong><p>The admin registers the coordinator's wallet. Unregistered wallets are refused.</p></div></li>
-            <li><span class="flow-n">2</span><div><strong>NGO signs the hours</strong><p>Only a salted fingerprint of the fake student ID goes on-chain, never a name or real ID.</p></div></li>
-            <li><span class="flow-n">3</span><div><strong>The contract enforces the rules</strong><p>Hours must be within the event's limit, one record per student per event, and fixes are new entries.</p></div></li>
-            <li><span class="flow-n">4</span><div><strong>Anyone verifies, with no wallet</strong><p>The auditor's browser recomputes the fingerprint and reads the full trail.</p></div></li>
-          </ol>
-        </div>
-      </div>
+      </section>
 
-      <div class="panel">
-        <div class="panel-head"><h3>Blockchain transparency</h3></div>
-        <div class="transparency">
-          <div><h4 class="ok-text">Stored on the blockchain</h4><ul class="ticks">
-            <li>Accredited coordinator wallets and org labels</li><li>Events with their maximum hours</li>
-            <li>Append-only records: hours, issuer, time, corrections</li><li>Salted fingerprints only</li></ul></div>
-          <div><h4 class="err-text">Never stored on the blockchain</h4><ul class="ticks no">
-            <li>Student names or real IDs</li><li>Secret salts</li><li>Any personal data</li></ul></div>
-          <div><h4>Contract</h4><p id="ovContract" class="mono small">—</p><p class="small muted">Every figure on this page comes from view calls on this contract, made by your browser through a public RPC.</p></div>
-        </div>
-      </div>
+      <footer class="lfoot">
+        <div class="brand static"><span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m7 12.5 3.2 3.2L17 8.8"/></svg></span><strong>ProofHours</strong></div>
+        <div class="lfoot-meta"><span>Contract</span><p id="ovContract" class="mono">—</p></div>
+        <p class="lfoot-note">Base Sepolia testnet prototype. All students, salts and NGOs shown are fictional demo data.</p>
+      </footer>
     </section>
 
     <!-- ================= VERIFY ================= -->
-    <section id="verify" class="page" data-title="Verify Hours" hidden>
-      <p class="page-intro">Confirm in seconds that a student's hours were recorded by an accredited NGO and never altered. No wallet or account needed.</p>
+    <section id="verify" class="page" data-title="Verify a record" hidden>
+      <header class="page-head"><h2>Verify a record</h2><p>Confirm that a student's hours were recorded by an accredited NGO, and see every change since. No wallet or account needed.</p></header>
       <div class="print-only print-head"><strong>ProofHours verification report</strong><span id="printMeta"></span></div>
       <div class="verify-layout">
         <form id="verifyForm" class="panel form-panel" novalidate>
-          <h3>Look up a student</h3>
+          <h3>Look up a record</h3>
           <div class="demo-chips" role="group" aria-label="Try a demo student">
             <span class="chips-label">Try a demo student</span>
             <button type="button" data-demo="S-001"><span class="vd valid"></span>Valid · S-001</button>
@@ -184,8 +189,8 @@
     </section>
 
     <!-- ================= MY IMPACT ================= -->
-    <section id="impact" class="page" data-title="My Impact" hidden>
-      <p class="page-intro">Your verified volunteer hours across every accredited NGO, read live from the blockchain. Use the Student ID and secret salt from your receipt; they never leave this page.</p>
+    <section id="impact" class="page" data-title="My impact" hidden>
+      <header class="page-head"><h2>My impact</h2><p>Your verified hours across every accredited NGO, read live from the ledger. Use the student ID and secret salt from your receipt; they never leave this page.</p></header>
       <form id="impactForm" class="panel impact-form" novalidate>
         <div class="demo-chips" role="group" aria-label="Try a demo volunteer">
           <span class="chips-label">Try a demo volunteer</span>
@@ -212,7 +217,8 @@
     </section>
 
     <!-- ================= COORDINATOR ================= -->
-    <section id="coord" class="page" data-title="Coordinator Portal" hidden>
+    <section id="coord" class="page" data-title="Coordinator" hidden>
+      <header class="page-head"><h2>Coordinator workspace</h2><p>Create events, record volunteer hours, and correct or revoke the records your NGO issued. Every write is checked by the contract before your wallet is asked to sign.</p></header>
       <div id="coordBanner" class="banner"></div>
       <div class="stats">
         <div class="stat"><span>Organisation</span><strong id="cOrg">—</strong></div>
@@ -221,16 +227,23 @@
       </div>
 
       <div class="grid-2">
+        <div class="stack">
         <form id="eventForm" class="panel form-panel">
-          <div class="panel-head"><h3><span class="step">1</span>Create an event</h3></div>
+          <div class="panel-head"><h3><span class="step">01</span>Create an event</h3></div>
           <label class="field"><span>Event code</span><input id="eCode" required placeholder="EVT-002 Tree Planting (demo)"></label>
           <label class="field"><span>Maximum hours (1–24)</span><input id="eMax" type="number" min="1" max="24" required value="6"></label>
           <button type="submit" class="btn btn-primary">Create event</button>
           <div class="msg" role="alert"></div>
         </form>
+        <div class="panel">
+          <div class="panel-head"><h3>Your events</h3></div>
+          <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Event code</th><th>Max hours</th><th><span class="sr">Action</span></th></tr></thead>
+            <tbody id="myEvents"><tr><td colspan="4" class="muted">Connect a coordinator wallet to see your events.</td></tr></tbody></table></div>
+        </div>
+        </div>
 
         <form id="recordForm" class="panel form-panel">
-          <div class="panel-head"><h3><span class="step">2</span>Record hours</h3></div>
+          <div class="panel-head"><h3><span class="step">02</span>Record hours</h3></div>
           <label class="field"><span>Event</span><select id="rEvent" required><option value="">Connect your wallet to load your events</option></select></label>
           <label class="field"><span>Volunteer</span>
             <select id="rPick"><option value="">Choose…</option><option value="new">New volunteer (generate a salt)</option></select></label>
@@ -246,7 +259,7 @@
         </form>
 
         <div id="pickPanel" class="panel span-2">
-          <div class="panel-head"><h3><span class="step">3</span>Find the record to fix</h3><span class="hint">corrections and revocations add new entries</span></div>
+          <div class="panel-head"><h3><span class="step">03</span>Find the record to fix</h3><span class="hint">corrections and revocations add new entries</span></div>
           <label class="field"><span>Search records</span><input id="pickSearch" type="search" placeholder="Record #, S-002, fingerprint, event, NGO or status" autocomplete="off" aria-controls="pickList"></label>
           <label class="check"><input id="pickMine" type="checkbox" checked> Only records my wallet can fix</label>
           <ul id="pickList" class="pick-list" aria-label="Records"><li class="muted small">Loading records…</li></ul>
@@ -254,7 +267,7 @@
         </div>
 
         <form id="correctForm" class="panel form-panel">
-          <div class="panel-head"><h3><span class="step">4</span>Correct a record</h3><span class="hint">adds a new entry</span></div>
+          <div class="panel-head"><h3><span class="step">04</span>Correct a record</h3><span class="hint">adds a new entry</span></div>
           <div class="pick-preview" data-preview>Pick a record above, or type its number.</div>
           <div class="field-row">
             <label class="field"><span>Record #</span><input id="cId" type="number" min="1" required></label>
@@ -266,7 +279,7 @@
         </form>
 
         <form id="revokeForm" class="panel form-panel">
-          <div class="panel-head"><h3><span class="step">5</span>Revoke a record</h3><span class="hint">adds a new entry</span></div>
+          <div class="panel-head"><h3><span class="step">05</span>Revoke a record</h3><span class="hint">adds a new entry</span></div>
           <div class="pick-preview" data-preview>Pick a record above, or type its number.</div>
           <label class="field"><span>Record #</span><input id="xId" type="number" min="1" required></label>
           <label class="field"><span>Reason code</span><input id="xReason" required value="ATTENDANCE_VOID" list="reasons" maxlength="31"></label>
@@ -276,21 +289,15 @@
       </div>
       <datalist id="reasons"><option value="TYPO_FIX"><option value="ATTENDANCE_VOID"><option value="WRONG_EVENT"></datalist>
 
-      <div class="grid-2">
-        <div class="panel">
-          <div class="panel-head"><h3>Your events</h3></div>
-          <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Event code</th><th>Max hours</th><th><span class="sr">Action</span></th></tr></thead>
-            <tbody id="myEvents"><tr><td colspan="4" class="muted">Connect a coordinator wallet to see your events.</td></tr></tbody></table></div>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><h3>Recent transactions</h3><span class="hint">this session</span></div>
-          <div class="txlist" data-txlist></div>
-        </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Recent transactions</h3><span class="hint">sent from this page, this session</span></div>
+        <div class="txlist" data-txlist></div>
       </div>
     </section>
 
     <!-- ================= ADMIN ================= -->
-    <section id="admin" class="page" data-title="Admin Portal" hidden>
+    <section id="admin" class="page" data-title="Admin" hidden>
+      <header class="page-head"><h2>Admin workspace</h2><p>Decide which NGO wallets may write records. Registering grants write access; revoking removes it, while records already signed stay on the ledger.</p></header>
       <div id="adminBanner" class="banner"></div>
       <div class="stats">
         <div class="stat"><span>Administrator wallet</span><strong id="adminAddr" class="mono">—</strong></div>
@@ -334,8 +341,8 @@
     </section>
 
     <!-- ================= SECURITY DEMO ================= -->
-    <section id="demo" class="page" data-title="Security Demo" hidden>
-      <p class="page-intro">Each scenario asks the smart contract to do something it must refuse. The contract code itself refuses it, not this website. Checks run as read-only calls, so no wallet is needed.</p>
+    <section id="demo" class="page" data-title="Contract rules" hidden>
+      <header class="page-head"><h2>Contract rules</h2><p>Each scenario asks the contract to do something it must refuse. The refusal comes from the contract itself, not from this website. Checks are read-only, so no wallet is needed.</p></header>
 
       <div class="panel ac">
         <div class="panel-head"><h3>How the contract controls access</h3></div>
@@ -400,7 +407,8 @@
     </section>
 
     <!-- ================= NETWORK ================= -->
-    <section id="network" class="page" data-title="Network Status" hidden>
+    <section id="network" class="page" data-title="Network status" hidden>
+      <header class="page-head"><h2>Network status</h2><p>Where this page reads the ledger from, and whether your wallet is on the same network.</p></header>
       <div class="stats four">
         <div class="stat"><span>Network</span><strong><span data-net>Base Sepolia</span> <small class="muted">· <span data-chain>84532</span></small></strong></div>
         <div class="stat"><span>Latest block</span><strong id="nBlock" class="mono">—</strong></div>
@@ -428,8 +436,8 @@
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script src="vendor/ethers.umd.min.js"></script>
-<script src="config.js?v=10"></script>
-<script src="demo-volunteers.js?v=10"></script>
-<script src="app.js?v=10"></script>
+<script src="config.js?v=13"></script>
+<script src="demo-volunteers.js?v=13"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>
