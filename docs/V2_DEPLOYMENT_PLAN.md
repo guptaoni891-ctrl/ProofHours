@@ -13,6 +13,7 @@
 | Live V1 | Base Sepolia (84532) | `0xFbDC…9F9b` (unchanged) | not deployed | Public site from `main` (tag `v1.0.0`) |
 | Local fork | Anvil fork of Base Sepolia, chain 31337, `127.0.0.1:8546` | copy of the live V1 | `ProofHoursLedger 0xd714…44bA`, `ProofHoursBadges 0x64d4…35F4` | Development, demos, e2e |
 | V2 staging | Base Sepolia | live V1 (read-only) | **not deployed (needs approval)** | After approval |
+| Attendance service | Off-chain | — | local only (`127.0.0.1:8790`) | Public hosting needs approval, rate limiting and a legal review of the data it holds |
 
 ## Local (reproducible, no keys)
 ```bash
@@ -21,8 +22,10 @@ cast rpc anvil_impersonateAccount 0x0000000000000000000000000000000050000001 --r
 cast rpc anvil_setBalance 0x0000000000000000000000000000000050000001 0x56BC75E2D63100000 --rpc-url http://127.0.0.1:8546
 SEED_DEMO=true forge script script/DeployV2.s.sol --rpc-url http://127.0.0.1:8546 --broadcast \
   --unlocked --sender 0x0000000000000000000000000000000050000001
+ATTENDANCE_SECRET=<random 32+ bytes> node server/attendance.js   # attendance service on 127.0.0.1:8790 (Node 22.13+)
 python -m http.server 8765 --directory docs    # open http://localhost:8765/?local
 ```
+- **Attendance service:** needs `ethers` (`cd server && npm install`). Settings: `PORT` (8790), `RPC_URL` (`http://127.0.0.1:8546`), `LEDGER` (local ledger address), `CHAIN_ID` (31337), `ATTENDANCE_DB` (`server/data/attendance.sqlite`). The page finds it through `config.js` → `local.attendance`, or `?api=` for another address.
 - **Fixed addresses:** the deployer `0x…50000001` has nonce 0 on Base Sepolia, so on every fresh fork the V2 contracts get the same addresses, which match `docs/config.js` → `local.v2`.
 - **Demo seed:** "Green Shores NGO (demo)" (coordinator = the V1 issuer wallet, so V1 records can be linked) and "Desert Bloom NGO (demo)".
 

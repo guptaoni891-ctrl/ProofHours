@@ -9,15 +9,31 @@
 4. **Smallest sound migration.** Keep the static, framework-free front end and its tested design system. Add backend services only where a capability truly needs a server: attendance tokens, indexing, search, private data.
 5. **Every external vendor sits behind an adapter**, with a working local substitute. Integrations without credentials are marked **Blocked**, never faked.
 
-## 2. Current state (after Stage 1)
+## 2. Current state (after Stage 2)
 
 ```
-Browser (docs/: static HTML/CSS/JS, ethers 6 vendored)
+Browser (docs/: static HTML/CSS/JS, ethers 6 and qrcode-generator vendored)
  ├─ V1 screens: verify, my impact, coordinator, admin, rules, network   ──reads/writes──▶  V1 VolunteerHours
- └─ V2 screens: my passport, V2 issuance                                 ──reads/writes──▶  ProofHoursLedger ──▶ ProofHoursBadges
-                                                                                                 └──reads──▶ V1 (migration)
+ ├─ V2 screens: my passport, V2 issuance                                 ──reads/writes──▶  ProofHoursLedger ──▶ ProofHoursBadges
+ │                                                                                               └──reads──▶ V1 (migration)
+ └─ V2 attendance: shifts, QR, review (coordinator); check-in (volunteer)
+        ├──REST + wallet sign-in──▶ attendance service (server/attendance.js, Node, SQLite) ──reads only──▶ ProofHoursLedger
+        └──issueBatch from the coordinator's own wallet──────────────────────────────────────▶ ProofHoursLedger
 Reads: public RPCs with failover (Base Sepolia) or a local fork (`?local`). Writes: the user's wallet (EIP-1193).
 ```
+
+### Attendance service (`server/attendance.js`, Stage 2)
+
+| Concern | Design |
+|---|---|
+| Keys | Holds **no** wallet keys and sends **no** transactions. It reads the ledger (coordinator NGO, opt-in, events, receipts) and stores attendance. |
+| Sign-in | One-time nonce → the wallet signs a fixed message (`personal_sign`, free) → a 2-hour HMAC bearer token. No cookies, so CORS `*` exposes nothing ambient. |
+| QR codes | `shift.kind.window.hmac`: HMAC-SHA256 over shift id, `in`/`out` and a 30-second window; accepted in its own window and the next (≤ 60 s). Stateless; replay is stopped by one check-in and one check-out per wallet per shift. |
+| Check-in rules | Volunteer must have opted in on-chain; check-in opens 30 min before the shift and closes at its end; capacity; no check-in while checked in elsewhere (no overlapping attendance); one attendance per wallet per event (the ledger allows one record per event). |
+| Location | Optional and unticked by default. The phone compares its position with the shift's site area (Haversine) and sends only yes/no. The service never accepts coordinates. Client-reported, so shown as information, not proof. |
+| Approval | Only a coordinator of the shift's NGO (checked on-chain each time, and the NGO must not be suspended). Hours = whole hours inside the shift window, capped at the event's maximum. Approval writes a salted evidence JSON and its keccak256 hash. |
+| Issuance | The page asks the service for the approved list and sends `issueBatch(event, wallets, hours, evidenceHashes)` from the coordinator's wallet. The service then reads the receipt and marks a row issued only if a `HoursIssued` log matches its event, wallet and evidence hash. |
+| Storage | `node:sqlite` file (`server/data/`, git-ignored). Postgres arrives with the Stage 3 indexer. |
 
 ### Contract suite (`src/v2/`, OpenZeppelin v5.7.0)
 
@@ -69,7 +85,7 @@ Reads: public RPCs with failover (Base Sepolia) or a local fork (`?local`). Writ
 ```
 
 - **Why not Next.js or React now:** the current UI works, is tested and is static-host friendly. A framework rewrite adds risk and a build step without user value. The new screens are added as plain modules (like `docs/v2.js`). This decision gets revisited if the screen count makes plain modules unmanageable.
-- **Backend:** one TypeScript service (`server/api`) plus an indexer worker (`server/indexer`). Postgres for durable data, Meilisearch for search, all in Docker Compose for local reproducibility. Environment variables come from `.env.example` files; no secrets are committed.
+- **Backend:** Stage 2 ships the attendance service as plain Node (no build step, built-in SQLite). Stage 3 adds the indexer worker, Postgres, Meilisearch and Docker Compose, and moves attendance data to Postgres. Environment variables come from `.env.example` files; no secrets are committed.
 - **Indexer:**
   - Polls logs by block range only in the backend; the front end never scans logs, which is a V1 rule.
   - Stores `(block number, block hash)`.
@@ -85,6 +101,6 @@ Reads: public RPCs with failover (Base Sepolia) or a local fork (`?local`). Writ
 |---|---|
 | Who may issue, correct or revoke hours | The contract (org-scoped coordinators); the UI pre-check only improves feedback |
 | Who may manage NGOs, caps, pause, reinstate | Contract roles (governance = intended multisig) |
-| Attendance validity (QR nonce, geofence boolean, approval) | Backend (Stage 2). A QR or GPS reading alone never issues hours; a coordinator must approve |
+| Attendance validity (QR window, single use per wallet, geofence boolean, approval) | Attendance service. A QR or GPS reading alone never issues hours; a coordinator approves, then signs `issueBatch` |
 | Private profile data | Backend vault with consent checks (Stage 5); never on-chain |
 | Search visibility | Index only public data and opted-in profiles |

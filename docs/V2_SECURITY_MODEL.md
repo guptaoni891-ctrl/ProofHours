@@ -29,12 +29,31 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
 | Badge transfer or sale | `_update` blocks every non-mint, non-burn path; `approve` and `setApprovalForAll` revert | `test_allTransferPathsRevert` |
 | Reentrancy | Badges use `_mint` (no receiver callback); the only external calls are to our badge contract and **view** calls to V1 | design + lint triage |
 | Overflow / underflow | Solidity 0.8 checked arithmetic; totals adjusted by exact old/new values | invariant suite |
-| Signature replay | No signatures are used in Stage 1 (all consent is a direct transaction). Stage 2 QR tokens: HMAC + single-use nonce + expiry, validated server-side | Stage 2 tests |
+| Signature replay | On-chain consent is a direct transaction. Attendance sign-in uses a one-time server nonce; QR codes are HMAC-bound to shift, kind and a 30 s window and expire within 60 s; each wallet checks in and out of a shift once | S-ATT sign-in and QR tests; E2E-ATT |
 | Wrong network / RPC lag in the UI | Three-state chain check, failover, fail-safe (no send if unverified) | e2e live/fork suites |
 | Compromised NGO keys | Auditor suspension, governance pause, per-NGO daily cap limits the damage | tests above |
 | Mock data shown as real | V2 screens show "not deployed" on networks without V2 | `E2E-V2 not deployed on Base Sepolia` |
 
-## 3. Static analysis
+## 3. Attendance service (Stage 2)
+
+| Threat | Mitigation | Evidence |
+|---|---|---|
+| Hours from a scan alone | The service cannot issue hours. Hours need a coordinator's approval **and** an `issueBatch` signed by that coordinator's wallet | S-ATT "QR and location alone issue nothing"; E2E-ATT chain checks |
+| Forged or edited QR code | HMAC-SHA256 with `ATTENDANCE_SECRET`; editing the window or kind breaks the MAC; constant-time compare | S-ATT |
+| Photo of the QR sent to someone absent | Code valid ≤ 60 s; one check-in per wallet; optional site yes/no; supervisor review. **Limit:** someone nearby within 60 s can still check in a wallet they control, so supervisors should know their volunteers | design |
+| Session theft or forgery | HMAC bearer token bound to the wallet and expiry; 2 h lifetime; nonce consumed on use | S-ATT sign-in tests |
+| Wrong NGO approving | Coordinator's NGO read from the ledger on every shift, QR, review and approval call; suspended NGOs refused | S-ATT |
+| Service marking hours issued that weren't | Marked only when the receipt has a matching `HoursIssued` (event, wallet, evidence hash) | S-ATT `issued` test; E2E-ATT |
+| Guessing attendance times from the public evidence hash | Evidence JSON includes a random 128-bit salt | design |
+| Location privacy | Only yes/no leaves the device; coordinates are never accepted or stored | S-ATT; E2E-ATT checks the database |
+| Abuse / flooding | **Not mitigated yet:** no rate limiting. The service binds to 127.0.0.1. Add rate limits before any public hosting | open |
+| Secret handling | `ATTENDANCE_SECRET` from the environment; if missing, a random per-process secret (sessions and codes end on restart) with a warning | design |
+| Clock skew | QR rotation is timed by the service's clock (it returns `now`), not the device's | E2E-ATT (service clock jumped 10 h) |
+| Receipt finality | **Shortcut:** one confirmation. On a public chain, wait for N confirmations (Stage 3 indexer) | open |
+
+**Data held:** wallet addresses, check-in/out times, site yes/no flags, decisions, reasons typed by coordinators, evidence JSON, record ids and tx hashes. No names, emails or coordinates. A retention policy and erasure path belong to Stage 5 (consent vault) and need legal review.
+
+## 4. Static analysis
 - **Forge lint:** run. Findings triaged:
   - `unsafe-typecast`: `uint64(block.timestamp)` and `uint32(block.timestamp / 1 days)` can't truncate for millions of years.
   - `calls-loop`: only to our badge contract, ≤ 5 iterations.
@@ -45,15 +64,16 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
   - `missing-events-access-control`: false positive; events are emitted.
 - **Slither / Aderyn:** **Blocked.** They aren't installed in this environment, and installing them needs approval.
 
-## 4. Privacy
+## 5. Privacy
 - **On-chain:** wallet addresses, hours, category enums, event codes chosen by NGOs, NGO names, and evidence **hashes**.
   - Event codes and NGO names are public by design; NGOs must not put personal data in them, and the UI says so.
   - Pseudonymous addresses can still be linked to people by outside data. Volunteers who need separation should use a dedicated wallet.
 - **Never on-chain:** names, emails, real student IDs, salts, raw GPS, sensitive affiliations.
 - **No compliance claim.** GDPR and UAE PDPL compliance needs legal review and a DPIA (**Blocked: legal**).
 
-## 5. Known limitations (Stage 1)
+## 6. Known limitations (after Stage 2)
 - **Wallet recovery:** not built yet (designed in the architecture doc, §3).
 - **Multisig and timelock:** not set up. The deploy script supports handing admin to a multisig, but none exists yet.
 - **NGO verification (KYB):** governance registers NGOs manually; KYB is Blocked on vendors.
-- **Evidence hashes:** they hash the roster line until attendance capture (Stage 2) provides real evidence.
+- **Evidence hashes:** attendance-based issuance uses real attendance evidence; the manual roster on the V2 issuance page still hashes the roster line.
+- **Attendance service:** local only; no rate limiting; no forgotten-check-out flow (the coordinator can only reject); rows are updated in place rather than kept as an append-only log.

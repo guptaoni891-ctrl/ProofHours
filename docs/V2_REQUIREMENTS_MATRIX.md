@@ -46,12 +46,12 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 
 | ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| M2.1 | Rotating HMAC-QR check-in/out (~90 s), single-use nonce, replay protection | P1 | none | Coordinator QR screen; volunteer scanner (PWA) | HMAC token service, nonce store, server-side validation | none | Shift session keys (env) | Stage 3 backend | Replayed or expired token rejected; screenshot of an old QR fails | Not Started |
-| M2.2 | Optional geofence: on-device Haversine, store only a boolean, explicit consent | P1 | none | Consent prompt, on-device check | Store `withinGeofence` only | none | Event coordinates | M2.1 | No raw GPS stored; refusal path works | Not Started |
-| M2.3 | Supervisor quick-approve queue, approved duration, batch sign | P1 | L `issueBatch` ✓ | Pending queue, approve/reject | Attendance DB, duration calculation | L `issueBatch` ✓ | Check-in/out logs | M2.1 | A QR or GPS reading alone never issues hours; approval required | In Progress (contract batch ✓) |
-| M2.4 | Double check-in and overlapping-shift prevention | P1 | L daily cap ✓ | Clear refusal messages | Overlap detection on timestamps | L 12h/day cap ✓ | Shift times | M2.1 | Overlap rejected; cap enforced ✓ | In Progress |
+| M2.1 | Rotating HMAC-QR check-in/out (~90 s), single-use nonce, replay protection | P1 | none | Coordinator QR panel (rotates every 30 s, by service clock) ✓; volunteer check-in page opened by the phone camera ✓ | HMAC-SHA256 tokens bound to shift, kind and 30 s window, accepted ≤ 60 s; one check-in and one check-out per wallet per shift (DB unique) ✓ | none | `ATTENDANCE_SECRET` (env) | none | Forged, edited-window, wrong-kind, expired and replayed codes refused ✓ (S-ATT, E2E-ATT) | Tested (local) |
+| M2.2 | Optional geofence: on-device Haversine, store only a boolean, explicit consent | P1 | none | Unticked consent box; Haversine on the device; only yes/no sent ✓ | Stores `in_site`/`out_site` as 1/0/null; non-booleans stored as null; coordinates never accepted ✓ | none | Site area per shift (public event site) | M2.1 | No coordinates stored ✓; refusal path (untick) ✓; client-reported, so informational only | Tested (local) |
+| M2.3 | Supervisor quick-approve queue, approved duration, batch sign | P1 | L `issueBatch` ✓ | Review table with Approve/Reject; "Issue approved hours on-chain" sends one `issueBatch` from the coordinator's wallet ✓ | Whole hours inside the shift window, capped at the event maximum; evidence JSON (salted) + keccak256 hash; receipt verified before marking issued ✓ | L `issueBatch` ✓ | Check-in/out logs (SQLite) | M2.1 | QR + location alone issue nothing ✓; approval by the NGO's coordinator only ✓; on-chain evidence hash = attendance evidence ✓ (S-ATT, E2E-ATT) | Tested (local) |
+| M2.4 | Double check-in and overlapping-shift prevention | P1 | L daily cap ✓ | Clear refusal messages ✓ | No check-in while checked in elsewhere; one attendance per wallet per shift and per event ✓ | L 12h/day cap ✓ | Shift times | M2.1 | Overlap and double check-in rejected ✓; cap enforced ✓ | Tested (local) |
 | M2.5 | Offline paper-to-chain voucher (QR/SMS scratch codes, Merkle root) | P2 | none | Redeem screen | Voucher signing, Merkle batches | Optional Merkle redemption | SMS gateway (vendor) | Stage 6 | Voucher single-use, tamper-evident | Not Started |
-| M2.6 | Attendance audit trail | P1 | L events ✓ | none | Append-only attendance log | `evidenceHash` field ✓ | none | M2.1 | Every issued hour links to evidence | In Progress |
+| M2.6 | Attendance audit trail | P1 | L events ✓ | Volunteer sees own attendance and status ✓ | Attendance rows keep times, site flags, decision, approver, evidence, record id and tx hash ✓ | `evidenceHash` field ✓ | none | M2.1 | Every attendance-issued hour links to its evidence ✓; append-only history log not yet (rows are updated in place) | In Progress |
 
 ## M3: Volunteer Impact 360 and public passport
 
@@ -93,7 +93,7 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 |---|---|---|---|---|---|---|---|---|---|---|
 | M6.1 | Batch hour issuance with automatic SBT mint | P1 | none | V2 issuance roster (multi-line = one batch) ✓ | none | L `issueBatch` ✓, auto mint ✓ | none | none | All-or-nothing batch ✓ (F-V2); E2E-V2 issuance ✓ | Tested |
 | M6.2 | Event management with category and service date | P1 | V1 events | V2 event form ✓ | none | L `createEvent` ✓ | none | none | E2E-V2 create event ✓ | Tested |
-| M6.3 | Shift scheduling, roster, QR management, approval queue | P1 | none | Cockpit screens | Shift DB | none | none | M2 | Shift lifecycle tests | Not Started |
+| M6.3 | Shift scheduling, roster, QR management, approval queue | P1 | none | Attendance page: create shift (times, capacity, optional site area), shift list, QR panel, review queue ✓ | Shift and attendance tables; capacity; check-in window (30 min early) and check-out window (2 h late) ✓ | none | none | M2 | Shift lifecycle tests ✓ (S-ATT, E2E-ATT); recurring shifts and roster import not built | In Progress |
 | M6.4 | Transaction previews and explicit progress | P1 | V1 pre-check ✓ | Dry-run before the wallet opens, receipt summaries ✓ | none | none | none | none | E2E-V2 refusals before signing ✓ | Tested |
 | M6.5 | Gas sponsorship (paymaster) | P1 | none | Gasless send | Paymaster integration | Selector allowlist | Pimlico / Coinbase paymaster (vendor) | Stage 6 | Spend caps enforced | Blocked (vendor account) |
 | M6.6 | Grant and Form 990 report pack | P2 | none | Export | Report generator | none | none | M10 | Values labelled estimates | Not Started |
@@ -159,7 +159,7 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 
 | ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| M12.1 | RBAC: volunteer, coordinator, NGO admin, auditor, governance | P1 | V1 admin/coordinator | Admin screens for V2 orgs to add | none | L roles ✓ | none | none | F-V2 permission tests ✓ | In Progress (UI) |
+| M12.1 | RBAC: volunteer, coordinator, NGO admin, auditor, governance | P1 | V1 admin/coordinator | One top-bar role pill for V1 + V2 roles (e.g. "V2 COORDINATOR: …", "V2 VOLUNTEER") ✓; admin screens for V2 orgs to add | Attendance service re-checks the coordinator's NGO on-chain on every action ✓ | L roles ✓ | none | none | F-V2 permission tests ✓; S-ATT role tests ✓; E2E-ATT pill ✓ | In Progress (V2 admin UI) |
 | M12.2 | Multisig governance (Safe 3-of-5) with timelock | P1 | none | none | none | Governance handover in the deploy script ✓; timelock to add | Safe | Approval | Admin role held by the multisig on deploy | Blocked (multisig signers, approval) |
 | M12.3 | Coordinator can never grant itself admin or auditor | P1 | none | none | none | Coordinators hold no AccessControl role ✓ | none | none | F-V2 ✓ | Tested |
 | M12.4 | Emergency pause; issuance limits; issuer suspension | P1 | none | Status shown in issuance context ✓ | none | L `pause` / `unpause`, org daily cap, `suspendOrg` ✓ | none | none | F-V2 ✓ | Tested |
@@ -180,9 +180,9 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 | X9.1 | WCAG 2.2 AA contrast, 24×24 px targets (44 px on touch), visible focus | P1 | In Progress (tokens ≥ 4.5:1, focus rings ✓; a full axe audit is outstanding) |
 | X9.2 | `prefers-reduced-motion` | P1 | Implemented |
 | X9.3 | English / Arabic with RTL from day one | P1 | Not Started (Stage 6) |
-| X9.4 | Mobile PWA for QR scanning | P1 | Not Started (Stage 2/6) |
+| X9.4 | Mobile PWA for QR scanning | P1 | In Progress (the phone's own camera opens the check-in link, and the page has no sideways scrolling at 375 px ✓; installable PWA and offline queue in Stage 6) |
 | X9.5 | High-contrast mode | P1 | Not Started |
-| X12.1 | Roles see/cannot table (§12) enforced at the right trust boundary | P1 | In Progress (contract roles ✓; backend roles in Stage 3) |
+| X12.1 | Roles see/cannot table (§12) enforced at the right trust boundary | P1 | In Progress (contract roles ✓; attendance service checks roles against the chain ✓; indexer/API roles in Stage 3) |
 | X12.2 | No on-platform donations (fundraising firewall) | P1 | Implemented (no payment code exists) |
 
 ## Appendix A: idea bank (evaluated separately, not validated requirements)
@@ -197,8 +197,8 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 | 6 | Unsung Hero drops | M4.7 | 4 | Not Started |
 | 7 | Polymath all-rounder badge | M4.8 | 4 (needs a contract tier) | Not Started |
 | 8 | Near-me rival strip | M4.3 | 4 | Not Started |
-| 9 | Rotating 90 s HMAC-QR gate | M2.1 | 2 | Not Started |
-| 10 | Geofence boolean proof | M2.2 | 2 | Not Started |
+| 9 | Rotating 90 s HMAC-QR gate | M2.1 | 2 | Tested (local; 30 s rotation, ≤ 60 s validity) |
+| 10 | Geofence boolean proof | M2.2 | 2 | Tested (local) |
 | 11 | Anomaly radar | M7.1 | 5 | Not Started |
 | 12 | Peer-vouched micro-checkpoints | M2 | 6 | Not Started |
 | 13 | Offline scratch-card / SMS voucher | M2.5 | 6 | Not Started |
