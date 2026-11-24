@@ -23,9 +23,12 @@ cast rpc anvil_setBalance 0x0000000000000000000000000000000050000001 0x56BC75E2D
 SEED_DEMO=true forge script script/DeployV2.s.sol --rpc-url http://127.0.0.1:8546 --broadcast \
   --unlocked --sender 0x0000000000000000000000000000000050000001
 ATTENDANCE_SECRET=<random 32+ bytes> node server/attendance.js   # attendance service on 127.0.0.1:8790 (Node 22.13+)
+node server/indexer.js                                         # indexer + search on 127.0.0.1:8792
 python -m http.server 8765 --directory docs    # open http://localhost:8765/?local
 ```
 - **Attendance service:** needs `ethers` (`cd server && npm install`). Settings: `PORT` (8790), `RPC_URL` (`http://127.0.0.1:8546`), `LEDGER` (local ledger address), `CHAIN_ID` (31337), `ATTENDANCE_DB` (`server/data/attendance.sqlite`). The page finds it through `config.js` → `local.attendance`, or `?api=` for another address.
+- **Indexer:** settings `PORT` (8792), `RPC_URL`, `LEDGER`, `CHAIN_ID`, `CONFIRMATIONS` (2), `START_BLOCK` (found automatically), `POLL_MS` (2000), `INDEXER_DB` (`server/data/indexer.sqlite`). The page finds it through `config.js` → `local.indexer`, or `?search=`. To rebuild from scratch, stop it and delete the database file.
+- **Search benchmark:** `node server/bench-search.js 100000 1000`.
 - **Fixed addresses:** the deployer `0x…50000001` has nonce 0 on Base Sepolia, so on every fresh fork the V2 contracts get the same addresses, which match `docs/config.js` → `local.v2`.
 - **Demo seed:** "Green Shores NGO (demo)" (coordinator = the V1 issuer wallet, so V1 records can be linked) and "Desert Bloom NGO (demo)".
 

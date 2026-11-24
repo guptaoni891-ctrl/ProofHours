@@ -69,14 +69,37 @@ Reads: public RPCs with failover (Base Sepolia) or a local fork (`?local`). Writ
 | Smart accounts and passkeys | The contracts only need `msg.sender`. Smart-account (ERC-4337/EIP-7702) and passkey wallets work unchanged. Embedded-wallet adapters (Privy, thirdweb, Coinbase) come in Stage 6. |
 | Wallet recovery (Stage 6, designed, not built) | Governance-approved `recoverVolunteer(old, new)`: requires the volunteer's proof via a guardian or passkey recovery and an NGO attestation. It moves totals and record ownership, and re-mints badges by burning on the old wallet and minting on the new (ERC-5484). Until then a lost wallet keeps its history but can't be moved. |
 
-## 4. Target architecture (Stages 2–6)
+### Indexer and search (`server/indexer.js`, Stage 3)
+
+| Concern | Design |
+|---|---|
+| Source | `ProofHoursLedger` logs for NGOs (registered, suspended, reinstated) and events. Volunteer-related logs are not fetched, so volunteer wallets are never stored or searchable. |
+| Finality | Indexes only blocks at least `CONFIRMATIONS` deep (default 2). |
+| Reorgs | Stores the hash of every block it relies on. Each poll compares the newest stored hash with the chain; on a mismatch it rolls back to the newest block whose hash still matches (a block hash commits to its ancestors) and replays. Deeper than the 256 kept hashes → full reindex. Tested with real reorgs on Anvil (`evm_snapshot`/`evm_revert`). |
+| Derived data | Orgs, events and the FTS5 index are rebuilt from the stored logs whenever they change. Every log keeps its tx hash and log index. Deleting the database file rebuilds everything from the chain. |
+| Search | FTS5 prefix queries (input reduced to letters and digits, so query syntax can't be injected), bm25 ranking with titles weighted 10×, impact-area facet counts. Measured: 1,000 events: p50 0.4 ms / p95 1.2 ms; 10,000: p50 2.7 ms / p95 3.7 ms; 100,000: p50 28.8 ms / p95 38.1 ms (server query time, localhost, Ryzen 7 7800X3D, Node 26). |
+| Start block | Found by binary search for the ledger's deploy block, or `START_BLOCK`. |
+
+### Paste-to-verify and public passports
+Pasted wallets, transaction hashes, `record N`, `badge N` and verification links are resolved **in the browser from the chain**, so they work on any network without a service. A wallet opens its public passport (`#passport=0x…`), which shows only public on-chain data.
+
+## 4. Target architecture (Stages 3–6)
+
+### Decisions recorded in Stage 3
+| Decision | Why | Revisit when |
+|---|---|---|
+| **SQLite (node:sqlite) instead of Postgres** for the indexer and attendance data | One process each, no Docker or image downloads, nothing to operate; the databases are caches or small operational stores | Several API instances need to share writes, or data outgrows one machine |
+| **SQLite FTS5 instead of Meilisearch** | Measured p95 38 ms at 100,000 events on localhost, under the 50 ms target; no extra service | Typo tolerance or semantic search (M5.4) is needed, or the event count passes ~100,000 |
+| **No EAS for now** (M11.4) | `ProofHoursLedger` already is the attestation registry, with consent, caps, corrections and badges. Writing the same facts to EAS would create a second source of truth | A partner needs EAS-format attestations; then mirror ledger records into EAS one way, with the ledger staying authoritative |
+| **IPFS deferred** (M8.5, M11.5) | Badge art is generated on-chain, so nothing needs pinning yet | Open Badges 3.0 evidence and bulk exports in Stage 5 |
+
 
 ```
                     ┌──────────────── static front end (GitHub Pages compatible) ────────────────┐
                     │ V1 + V2 screens, Cmd+K search, passport, cockpit, auditor console, EN/AR RTL │
                     └───────▲─────────────────────────▲──────────────────────────▲───────────────┘
                             │ chain reads/writes       │ REST (JSON)              │ search
-                     Base Sepolia / local fork    api (TypeScript, Fastify)   Meilisearch
+                     Base Sepolia / local fork    api (Node services)          search (SQLite FTS5)
                             │                          │   ├─ attendance: HMAC-QR tokens, nonces, approvals
                             │                          │   ├─ profiles & consent (encrypted PII vault)
                             ▼                          │   ├─ reports / transcripts / OB3 issuer (KMS key)

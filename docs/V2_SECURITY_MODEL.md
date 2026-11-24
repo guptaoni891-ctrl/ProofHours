@@ -53,6 +53,16 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
 
 **Data held:** wallet addresses, check-in/out times, site yes/no flags, decisions, reasons typed by coordinators, evidence JSON, record ids and tx hashes. No names, emails or coordinates. A retention policy and erasure path belong to Stage 5 (consent vault) and need legal review.
 
+### Indexer and search (Stage 3)
+| Threat | Mitigation | Evidence |
+|---|---|---|
+| Searching for volunteers | Volunteer-related logs are never fetched; a partial wallet finds nothing | S-IDX "volunteer wallets are never indexed"; E2E-DISC |
+| Search query injection | Input reduced to letters and digits, then quoted prefix terms; SQL uses bound parameters | S-IDX `ftsQuery` test |
+| Stale or orphaned data after a reorg | Block-hash checks, rollback and replay; confirmation depth | S-IDX reorg test |
+| Suspended NGO still advertised | Directory re-reads NGO status from the chain on every load and hides suspended NGOs | E2E-DISC |
+| Trusting the index for verification | Verification (paste resolver, passports) reads the chain directly, never the index | design |
+| Abuse | Read-only API on 127.0.0.1; **no rate limiting yet** | open |
+
 ## 4. Static analysis
 - **Forge lint:** run. Findings triaged:
   - `unsafe-typecast`: `uint64(block.timestamp)` and `uint32(block.timestamp / 1 days)` can't truncate for millions of years.

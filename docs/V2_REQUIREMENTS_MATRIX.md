@@ -36,7 +36,7 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 |---|---|---|---|---|---|---|---|---|---|---|
 | M1.1 | Impact XP and hero strip: verified lifetime hours, civic level, streak with freeze shields, badge count | P1 | V1 My Impact; L totals | Passport hero: total hours ✓, badge count via vault ✓; level, XP and streak to add | Streak and level computed from indexed records | L `totalHours`, `categoryHours` ✓ | Record timestamps | M11 indexer (streaks) | E2E-V2 passport total ✓; streak unit tests (todo) | In Progress |
 | M1.2 | Next-milestone quest bar, exact hours to the next automated mint | P1 | V1 My Impact bar | Passport total milestone bar and per-area bars ✓ | none | B thresholds ✓ | none | none | E2E-L My Impact 50%, E2E-V2 milestone ✓ | Tested |
-| M1.3 | Active mission and shift feed matched by category, distance, skills | P1 | none | Feed on the hub | Opportunities API, matching | none | Shift DB, user preferences | M2, M5 | Feed shows only open, real shifts | Not Started |
+| M1.3 | Active mission and shift feed matched by category, distance, skills | P1 | none | Opportunities page: upcoming shifts with area facets, NGO filter, spots left ✓ | Attendance service `GET /opportunities` (public, no attendee data) ✓ | none | Shift DB | M2, M5 | Feed shows only open, real shifts ✓ (ended shifts and suspended NGOs left out; E2E-DISC); distance and skills matching not built | In Progress |
 | M1.4 | Badge unlock vault: real SBTs, art, mint tx, share | P1 | none | Trophy Vault reads real tokens and on-chain art ✓; unlock animation and share to add | none | B `tokenOfKey`, `tokenURI` ✓ | none | M8.2 for sharing | E2E-V2 vault shows 2 minted badges, no fake ones ✓ | In Progress |
 | M1.5 | Wallet-linked volunteer identity | P1 | none | Passport tied to the connected wallet ✓ | Smart-account and passkey adapters (Stage 6) | L `optIn` ✓, V1 linking ✓ | none | none | F-V2 opt-in tests ✓, E2E-V2 ✓ | In Progress |
 | M1.6 | Impact Companion avatar grows with verified hours (§7, App. A #1) | P1 | none | Avatar from verified totals, arcade only | none | none | none | M1.1 | Grows only from verified hours | Not Started |
@@ -57,7 +57,7 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 
 | ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| M3.1 | Shareable public passport: lifetime hours by area, issuers, SBTs | P1 | Passport ✓ | Public read-only `?passport=0x…` view; currently shows the connected wallet only | Optional profile handle (opt-in) | L, B views ✓ | none | M9.3 consent | Third party sees only what the volunteer published | In Progress |
+| M3.1 | Shareable public passport: lifetime hours by area, issuers, SBTs | P1 | Passport ✓ | Public read-only view at `#passport=0x…` (from search or a pasted wallet): totals, badges, records; no opt-in or V1-link forms ✓ | Optional profile handle (opt-in) not built | L, B views ✓ | none | M9.3 consent | Shows only public on-chain data ✓ (E2E-DISC); handles and per-category disclosure need M9.3 | In Progress |
 | M3.2 | Dual-mode toggle: Arcade and Verifier Clean | P1 | V1 print report ✓ | Clean institutional mode | none | none | none | none | Same data in both modes | In Progress (print view only) |
 | M3.3 | One-click proof drawer: issuer, timestamp, explorer link, status | P1 | V1 verify evidence ✓ | V2 per-record drawer with tx link | Indexer supplies tx hashes | L events ✓ | none | M11 | Every hour and badge links to its tx | In Progress |
 | M3.4 | Endorsements and skill graph co-signed by supervisors | P2 | none | Skill tags | Signed endorsements | Optional | OB3 skill assertions | M8.2 | Endorsement verifies to the NGO signer | Not Started |
@@ -82,9 +82,9 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 
 | ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| M5.1 | Global Cmd/Ctrl+K omni-search: opportunities, verified NGOs, opted-in volunteers, badges, credentials; typo-tolerant; <50 ms target | P1 | none | Command palette | Meilisearch index plus sync from indexer | none | Meilisearch (self-hosted, Docker) | M11 | Benchmarked p50/p95 latency reported; private identities never indexed | Not Started |
-| M5.2 | Facets: impact area, SDG, verified-hours slider, city/remote, accessibility, EN/AR | P1 | none | Filter pills | Facet schema | none | Opportunity schema | M5.1 | Facet counts correct | Not Started |
-| M5.3 | Paste-to-verify resolver: wallet, handle, badge id or URL, with non-revocation check | P1 | V1 verify by ID + salt ✓ | Resolver input | Optional | B `ownerOf` / `locked` ✓ | none | M5.1 | Revoked or burned badge shows as such | In Progress |
+| M5.1 | Global Cmd/Ctrl+K omni-search: opportunities, verified NGOs, opted-in volunteers, badges, credentials; typo-tolerant; <50 ms target | P1 | none | Command palette (Ctrl/Cmd+K, top-bar button, arrow keys, Esc) ✓ | Indexer search API on SQLite FTS5: NGOs and events, prefix matching, ranked ✓ | none | none (Meilisearch deferred, see architecture §4) | M11 | Benchmarked ✓: 1,000 events: p50 0.4 ms / p95 1.2 ms; 10,000: p50 2.7 ms / p95 3.7 ms; 100,000: p50 28.8 ms / p95 38.1 ms (server query time, localhost, Ryzen 7 7800X3D, Node 26). Volunteers deliberately not searchable (no profile consent exists yet) ✓. **Not typo-tolerant** (FTS5 matches prefixes only) | In Progress |
+| M5.2 | Facets: impact area, SDG, verified-hours slider, city/remote, accessibility, EN/AR | P1 | none | Impact-area facet chips with counts (search and directory), NGO filter, spots-left filter ✓ | Facet counts per text match ✓ | none | Opportunity schema | M5.1 | Facet counts correct ✓ (S-IDX, E2E-DISC). SDG, hours slider, city/remote, accessibility, language: no data for them yet | In Progress |
+| M5.3 | Paste-to-verify resolver: wallet, handle, badge id or URL, with non-revocation check | P1 | V1 verify by ID + salt ✓ | In the palette: wallet, tx hash, `record N`, `badge N`, V1 verification links, check-in and passport links, all read from the chain ✓ | none needed | B `ownerOf` / `locked` ✓ | none | M5.1 | Revoked records show "Revoked"; burned badges show "not held" ✓ (E2E-DISC). Handles need M3.1 | Tested (local) |
 | M5.4 | Hybrid semantic skill matching (opt-in talent) | P2 | none | NL query | Meilisearch hybrid / embeddings | none | Embedding model | M5.1, M9.3 | Only opted-in profiles | Not Started |
 
 ## M6: NGO operations cockpit
@@ -119,7 +119,7 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 | M8.2 | Correction and revocation lifecycle: burn when hours fall below, re-mint on re-cross | P1 | none | Vault updates ✓ | none | B `_reconcile` ✓ | none | none | F-V2, E2E-V2 burn after correction ✓ | Tested (local chain) |
 | M8.3 | ERC-5484 consensual: `burnAuth` = Both, consent before mint, holder renounce/reclaim | P1 | none | Renounce UI to add | none | B `burnAuth`, `renounce`, `reclaim`; L `optIn` ✓ | none | none | F-V2 renounce/reclaim ✓ | In Progress (UI) |
 | M8.4 | Dynamic evolving badge artwork | P1 | none | Vault renders on-chain SVG ✓ | none | B on-chain JSON + SVG (tier ring) ✓ | none | none | F-V2 `tokenURI` decodes ✓ | Tested |
-| M8.5 | Pinned immutable assets (IPFS) | P1 | none | none | IPFS adapter | none | Pinata or self-hosted IPFS | Stage 3 | CID stable | Not Started (on-chain art covers current badges) |
+| M8.5 | Pinned immutable assets (IPFS) | P1 | none | none | none | none | none | Stage 5 | CID stable | **Deferred:** nothing needs pinning yet (badge art is generated on-chain). Built with OB3 evidence in Stage 5 |
 | M8.6 | Open Badges 3.0 / W3C VC 2.0 credential generation and validation, Status List, LinkedIn sharing | P2 | none | Export and share | Issuer key (KMS) / DID, signer, status list | none | 1EdTech validator | Stage 5 | OB3 validates; revocation reflected | Not Started |
 
 ## M9: Risk, privacy and regulatory tools
@@ -147,11 +147,11 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 
 | ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| M11.1 | Event indexer with reorg handling and confirmation depth | P1 | V1 view reads | none | Indexer service (TypeScript) | L/B events ✓ | Postgres | Stage 3 | Reorg replay test; reindex from genesis | Not Started |
-| M11.2 | Durable storage and backend APIs | P1 | none | API client | REST API | none | Postgres (Docker) | Stage 3 | API contract tests | Not Started |
-| M11.3 | Search synchronisation | P1 | none | none | Indexer → Meilisearch | none | Meilisearch | M5 | Index reflects chain within N blocks | Not Started |
-| M11.4 | EAS integration where justified | P1 | none | none | Attestation writer | EAS schema resolver | EAS on Base | Stage 3 | Decision recorded (ledger already holds the attestations) | Not Started (to evaluate) |
-| M11.5 | Content-addressed storage adapter | P1 | none | none | IPFS adapter | none | IPFS | Stage 3 | CID round trip | Not Started |
+| M11.1 | Event indexer with reorg handling and confirmation depth | P1 | V1 view reads | none | `server/indexer.js`: confirmation depth, stored block hashes, rollback to the last matching hash and replay; finds the deploy block ✓ | L events ✓ | SQLite | Stage 3 | Reorg replay test on a real chain ✓ (S-IDX); full reindex = delete the database | Tested (local) |
+| M11.2 | Durable storage and backend APIs | P1 | none | API clients in the page ✓ | Attendance REST API ✓; read-only search API ✓ | none | SQLite files (`server/data/`) | Stage 3 | API tests ✓ (S-ATT, S-IDX) | In Progress (Postgres when the limits in architecture §4 are reached) |
+| M11.3 | Search synchronisation | P1 | none | none | The index is rebuilt from indexed logs whenever they change, so it follows reorgs ✓ | none | SQLite FTS5 | M5 | Index reflects the chain within the confirmation depth ✓ (S-IDX) | Tested (local) |
+| M11.4 | EAS integration where justified | P1 | none | none | none | none | EAS on Base | Stage 3 | Decision recorded ✓ (architecture §4: not now; the ledger already is the attestation registry) | **Decided: not now** |
+| M11.5 | Content-addressed storage adapter | P1 | none | none | none | none | IPFS | Stage 5 | CID round trip | **Deferred** to Stage 5 (no content needs it yet; see M8.5) |
 | M11.6 | Blockchain truth separate from cached views | P1 | FE reads chain directly ✓ | "From cache" labels | Cache marked derived | none | none | M11.1 | UI distinguishes cached data | In Progress |
 | M11.7 | V1 read-only compatibility | P1 | V1 ✓ | V1 screens unchanged ✓ | none | L reads V1 via interface ✓ | none | none | E2E-L 91/91, F-V2 V1 migration ✓ | Tested |
 
@@ -203,9 +203,9 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 | 12 | Peer-vouched micro-checkpoints | M2 | 6 | Not Started |
 | 13 | Offline scratch-card / SMS voucher | M2.5 | 6 | Not Started |
 | 14 | Emergency-response fast-track | M4.8 | later | Not Started |
-| 15 | Sub-50 ms omni-search | M5.1 | 3 | Not Started |
-| 16 | Paste-to-verify resolver | M5.3 | 3 | In Progress |
-| 17 | SDG and inclusion filter matrix | M5.2 | 3 | Not Started |
+| 15 | Sub-50 ms omni-search | M5.1 | 3 | Tested (local benchmark: p95 38 ms at 100,000 events) |
+| 16 | Paste-to-verify resolver | M5.3 | 3 | Tested (local) |
+| 17 | SDG and inclusion filter matrix | M5.2 | 3 | In Progress (impact-area facets; SDG tags need event metadata) |
 | 18 | NL recruiter talent finder | M5.4 | later | Not Started |
 | 19 | City impact heatmap (district-level, anonymised) | none | later | Not Started |
 | 20 | Dollars-for-Doers auto-matcher | M6.7 | 5 | Blocked |
