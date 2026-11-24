@@ -7,7 +7,7 @@
   <meta name="description" content="ProofHours records community-service hours from accredited NGOs on a public ledger, so anyone can verify them in seconds.">
   <title>ProofHours · Verifiable volunteer records</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F4F4F5'/%3E%3Cpath d='M10 16.5l4 4 8-9' stroke='%2308090B' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=19">
+  <link rel="stylesheet" href="style.css?v=20">
 </head>
 <body data-view="landing">
 <a class="skip" href="#main">Skip to content</a>
@@ -26,6 +26,8 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 3 8.4 7 10 4-1.6 7-5.5 7-10V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>Verify a record</button>
     <button class="nav-item" data-page="opps">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M8 14h3"/></svg>Opportunities<span class="tag">V2</span></button>
+    <button class="nav-item" data-page="reports">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg>Impact reports<span class="tag">V2</span></button>
     <button class="nav-item" data-page="impact">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>My impact</button>
     <button class="nav-item" data-page="passport">
@@ -41,6 +43,8 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>V2 issuance<span class="tag">V2</span></button>
     <button class="nav-item" data-page="attend">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>Attendance<span class="tag">V2</span></button>
+    <button class="nav-item" data-page="audit">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.2-4.2M9 11h4"/></svg>Auditor<span class="tag">V2</span></button>
     <span class="nav-label">System</span>
     <button class="nav-item" data-page="demo">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Contract rules</button>
@@ -197,6 +201,12 @@
           </div>
         </div>
       </div>
+      <form id="credForm" class="panel form-panel">
+        <div class="panel-head"><h3>Verify an Open Badges credential</h3><span class="hint">V2 · VC-JWT</span></div>
+        <label class="field"><span>Credential <em>paste the .jwt text</em></span><textarea id="credJwt" rows="3" class="mono" spellcheck="false" placeholder="eyJhbGciOiJFZERTQSIs…"></textarea></label>
+        <button type="submit" class="btn btn-ghost">Verify credential</button>
+        <div class="msg" role="alert"></div>
+      </form>
     </section>
 
     <!-- ================= MY IMPACT ================= -->
@@ -240,6 +250,7 @@
           <div class="msg" role="alert"></div>
         </form>
         <div id="ppSummary" class="pp-summary"></div>
+        <div id="ppProfileView" class="banner" hidden></div>
         <section id="ppGame" class="game" aria-label="Progress" hidden>
           <div class="game-hero">
             <div id="ppCompanion" class="companion" role="img"></div>
@@ -258,7 +269,7 @@
           </form>
         </section>
         <form id="vaultForm" class="panel">
-          <div class="panel-head"><h3>Trophy Vault</h3><span class="hint">soulbound badges held by this wallet on this chain</span><button type="button" id="ppShare" class="btn btn-ghost sm">Copy public link</button></div>
+          <div class="panel-head"><h3>Trophy Vault</h3><span class="hint">soulbound badges held by this wallet on this chain</span><span class="head-btns"><button type="button" id="ppPrint" class="btn btn-ghost sm">Print transcript</button><button type="button" id="ppShare" class="btn btn-ghost sm">Copy public link</button></span></div>
           <div id="ppVault" class="vault"><p class="muted small">Connect a wallet to see its badges.</p></div>
           <button type="submit" hidden>Send</button>
           <div class="msg" role="alert"></div>
@@ -267,6 +278,17 @@
           <div class="panel-head"><h3>Records</h3><span class="hint">latest entry of each record</span></div>
           <ul id="ppRecords" class="impact-list"><li class="muted small">No records yet.</li></ul>
         </section>
+        <form id="profileForm" class="panel form-panel" hidden>
+          <div class="panel-head"><h3>Private profile</h3><span class="hint">optional · encrypted · never on-chain</span></div>
+          <p class="small muted">Add details for transcripts and people you share your link with. Each field has its own visibility: <strong>Private</strong> (only you), <strong>Link</strong> (people with your share link) or <strong>Public</strong>. Delete erases it for good: the encryption key is destroyed.</p>
+          <div class="field-row three">
+            <label class="field"><span>Display name</span><input id="pfName" maxlength="60"><select id="pfNameVis" aria-label="Display name visibility"><option value="private">Private</option><option value="link">Link</option><option value="public">Public</option></select></label>
+            <label class="field"><span>School or university</span><input id="pfSchool" maxlength="80"><select id="pfSchoolVis" aria-label="School visibility"><option value="private">Private</option><option value="link">Link</option><option value="public">Public</option></select></label>
+            <label class="field"><span>Short bio</span><input id="pfBio" maxlength="280"><select id="pfBioVis" aria-label="Bio visibility"><option value="private">Private</option><option value="link">Link</option><option value="public">Public</option></select></label>
+          </div>
+          <div class="btn-row"><button type="submit" class="btn btn-primary sm">Save profile</button><button type="button" id="pfLoad" class="btn btn-ghost sm">Load my profile</button><button type="button" id="pfDelete" class="btn btn-danger sm">Delete profile</button></div>
+          <div class="msg" role="alert"></div>
+        </form>
         <form id="v1LinkForm" class="panel form-panel">
           <div class="panel-head"><h3>Bring a V1 record into your passport</h3></div>
           <p class="small muted">Enter the record number from your V1 receipt. This only records your consent: the NGO that issued it must confirm, and the hours are read from the V1 contract, never typed in.</p>
@@ -293,6 +315,53 @@
           </div>
         </div>
         <ul id="opList" class="op-list" aria-live="polite"><li class="muted small">Loading…</li></ul>
+      </div>
+    </section>
+
+    <section id="reports" class="page" data-title="Impact reports" hidden>
+      <header class="page-head"><h2>Impact reports</h2><p>Verified hours an NGO has issued, by impact area and period, for NGO, ESG and CSR reporting. Figures are the latest entry of each record, so corrections and revocations are already applied.</p></header>
+      <div id="rpNotice" class="banner warn" hidden></div>
+      <div id="rpBody" class="v2-body" hidden>
+        <form id="reportForm" class="panel form-panel">
+          <div class="field-row three">
+            <label class="field"><span>NGO</span><select id="rpOrg" required></select></label>
+            <label class="field"><span>From <em>service date</em></span><input id="rpFrom" type="date"></label>
+            <label class="field"><span>To</span><input id="rpTo" type="date"></label>
+          </div>
+          <button type="submit" class="btn btn-primary">Build report</button>
+          <div class="msg" role="alert"></div>
+        </form>
+        <div id="rpOut" class="panel" hidden></div>
+      </div>
+    </section>
+
+    <section id="audit" class="page" data-title="Auditor" hidden>
+      <header class="page-head"><h2>Auditor console</h2><p>Automatic alerts are allegations, not findings: nothing happens until a person reviews them. Open a case, record what you checked, and decide. Suspending an NGO is an on-chain action from your own wallet.</p></header>
+      <div id="auNotice" class="banner warn" hidden></div>
+      <div id="auBody" class="v2-body" hidden>
+        <div id="auContext" class="banner"></div>
+        <div class="grid-2">
+          <div class="panel">
+            <div class="panel-head"><h3>Alerts</h3><button type="button" id="auLoad" class="btn btn-ghost sm">Sign in and load</button></div>
+            <ul id="auAlerts" class="shift-list"><li class="muted small">Sign in with an auditor wallet to load alerts.</li></ul>
+          </div>
+          <form id="sampleForm" class="panel form-panel">
+            <div class="panel-head"><h3>Spot-audit sample</h3><span class="hint">reproducible from its seed</span></div>
+            <div class="field-row">
+              <label class="field"><span>Rate</span><select id="smRate"><option value="0.02">2%</option><option value="0.03" selected>3%</option><option value="0.05">5%</option></select></label>
+              <label class="field"><span>Seed <em>optional; default: latest indexed block hash</em></span><input id="smSeed" class="mono" placeholder="0x…"></label>
+            </div>
+            <button type="submit" class="btn btn-ghost">Draw sample</button>
+            <div class="msg" role="alert"></div>
+            <ul id="smList" class="shift-list"></ul>
+          </form>
+        </div>
+        <form id="caseForm" class="panel form-panel">
+          <div class="panel-head"><h3>Cases</h3><span class="hint">reviews and decisions, kept off-chain</span></div>
+          <ul id="auCases" class="case-list"><li class="muted small">No cases loaded.</li></ul>
+          <button type="submit" hidden>Send</button>
+          <div class="msg" role="alert"></div>
+        </form>
       </div>
     </section>
 
@@ -658,6 +727,8 @@
 
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
+<div id="transcriptView" class="transcript" hidden></div>
+
 <dialog id="omni" class="omni" aria-label="Search ProofHours">
   <div class="omni-input"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="omniQ" type="text" autocomplete="off" spellcheck="false" aria-label="Search NGOs and events, or paste a wallet, transaction, record or verification link" placeholder="Search NGOs and events, or paste a wallet, tx, record # or link"><kbd>Esc</kbd></div>
   <div id="omniFacets" class="facets omni-facets" role="group" aria-label="Impact area"></div>
@@ -666,12 +737,12 @@
 </dialog>
 
 <script src="vendor/ethers.umd.min.js"></script>
-<script src="config.js?v=19"></script>
-<script src="demo-volunteers.js?v=19"></script>
-<script src="app.js?v=19"></script>
-<script src="v2-abi.js?v=19"></script>
+<script src="config.js?v=20"></script>
+<script src="demo-volunteers.js?v=20"></script>
+<script src="app.js?v=20"></script>
+<script src="v2-abi.js?v=20"></script>
 <script src="vendor/qrcode.js"></script>
-<script src="progress.js?v=19"></script>
-<script src="v2.js?v=19"></script>
+<script src="progress.js?v=20"></script>
+<script src="v2.js?v=20"></script>
 </body>
 </html>

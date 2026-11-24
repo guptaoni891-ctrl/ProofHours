@@ -221,7 +221,7 @@ async function refreshRole() {
 
 function renderWallet() {
   const pill = $("rolePill");
-  const v2Parts = [v2?.org && "V2 COORDINATOR: " + v2.org, v2?.opted && !v2.org && "V2 VOLUNTEER"].filter(Boolean);
+  const v2Parts = [v2?.auditor && "V2 AUDITOR", v2?.org && "V2 COORDINATOR: " + v2.org, v2?.opted && !v2.org && !v2.auditor && "V2 VOLUNTEER"].filter(Boolean);
   let [text, cls] = {
     admin: [isCoord ? "ADMIN · COORDINATOR: " + orgLabel : "ADMIN", "admin"],
     coord: ["COORDINATOR: " + orgLabel, "coord"],

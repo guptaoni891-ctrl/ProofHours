@@ -27,6 +27,7 @@
     if (e.name === "RecordRevoked") return `Record #${a.newRecordId} revokes #${a.replacesId}`;
     if (e.name === "V1LinkRequested") return `Link to V1 record #${a.v1Id} requested`;
     if (e.name === "V1Migrated") return `V1 record #${a.v1Id} imported as #${a.recordId} (${a.hoursLogged}h)`;
+    if (e.name === "OrgSuspended") return `NGO #${a.orgId} suspended`;
     return null;
   });
 
@@ -72,7 +73,7 @@
 
   // ---------- Passport ----------
   // viewAddr: someone else's public passport (#passport=0x…). Everything shown is public on-chain data.
-  let viewAddr = null;
+  let viewAddr = null, viewKey = null;
   async function loadPassport() {
     const c = await available("ppNotice", "ppBody");
     if (!c) return;
@@ -84,7 +85,7 @@
     $("v1LinkForm").hidden = pub;
     if (pub) {
       $("ppPublic").innerHTML = `${ICON.info}<div><strong>Public passport of <code>${viewAddr}</code>.</strong> Everything here is public on-chain data anyone can read. <button type="button" class="btn btn-ghost sm" id="ppMine">View my own passport</button></div>`;
-      $("ppMine").onclick = () => { viewAddr = null; history.replaceState(null, "", location.pathname + location.search); loadPassport(); };
+      $("ppMine").onclick = () => { viewAddr = viewKey = null; history.replaceState(null, "", location.pathname + location.search); loadPassport(); };
     }
     if (!me) {
       consent.innerHTML = `${ICON.info}<span><strong>Connect your wallet</strong> to see its passport. Your passport is tied to the wallet you volunteer with.</span>`;
@@ -94,6 +95,8 @@
       $("ppRecords").innerHTML = `<li class="muted small">No wallet connected.</li>`;
       gameReady = false;
       applyMode();
+      lastPassport = null;
+      $("profileForm").hidden = $("ppProfileView").hidden = true;
       return;
     }
     const [opted, total, cats] = await Promise.all([c.ledger.optedIn(me), c.ledger.totalHours(me), c.ledger.categoryHours(me)]);
@@ -114,10 +117,12 @@
         return `<li class="cat c${i}"><span class="cat-name">${name}</span><span class="cat-bar" aria-hidden="true"><span style="--p:${n ? Math.round((h / n) * 100) : 100}%"></span></span><span class="cat-h mono">${h}h${n ? `<em> / ${n}</em>` : ""}</span></li>`;
       }).join("")}</ul>`;
 
-    await renderVault(c, me, t, catH, !pub);
+    const badges = await renderVault(c, me, t, catH, !pub);
     const heads = await renderRecords(c, me);
+    lastPassport = { me, own: !pub, total: t, catH, records: heads, badges };
     renderGame(t, catH, heads, opted, !pub);
     await renderLeague(!pub, opted);
+    await renderProfile(!pub, me);
   }
 
   // ---------- Progress (Stage 4): everything below derives from verified on-chain data only ----------
@@ -207,7 +212,7 @@
       const json = JSON.parse(atob((await c.badges.tokenURI(id)).split(",")[1]));
       const isNew = fresh.some(([, , f]) => f === id);
       return `<figure class="trophy${isNew ? " unlocked" : ""}"><img src="${json.image}" alt="${esc(json.name)}" width="120" height="120"><figcaption><strong>${label(k, th)}</strong><span>Token #${id} · soulbound${isNew ? ' · <em class="new-tag">new</em>' : ""}</span>
-        ${own ? `<button type="button" class="btn btn-ghost sm" data-renounce="${id}" data-label="${label(k, th)}">Renounce</button>` : ""}</figcaption></figure>`;
+        ${own ? `<span class="trophy-btns">${API ? `<button type="button" class="btn btn-ghost sm" data-cred="${id}">Credential</button>` : ""}<button type="button" class="btn btn-ghost sm" data-renounce="${id}" data-label="${label(k, th)}">Renounce</button></span>` : ""}</figcaption></figure>`;
     }));
     const ren = renounced.map(([k, th]) => `<figure class="trophy renounced"><div class="goal-ring" aria-hidden="true"></div><figcaption><strong>${label(k, th)}</strong><span>Earned · renounced by you</span>
       <button type="button" class="btn btn-ghost sm" data-reclaim="${k}:${th}">Reclaim</button></figcaption></figure>`);
@@ -222,10 +227,12 @@
       goals.map(([label, left]) => `<figure class="trophy goal" aria-label="Not earned yet"><div class="goal-ring" aria-hidden="true"></div><figcaption><strong>${label}</strong><span>Not earned yet · ${left}h to go</span></figcaption></figure>`).join("");
     $("vaultForm").querySelector(".msg").className = "msg";
     $("vaultForm").querySelector(".msg").textContent = "";
+    return earned.map(([k, th, id]) => `${label(k, th)} (token #${id})`);
   }
 
   $("ppVault").onclick = (e) => {
-    const r = e.target.closest("[data-renounce]"), rc = e.target.closest("[data-reclaim]"), form = $("vaultForm");
+    const r = e.target.closest("[data-renounce]"), rc = e.target.closest("[data-reclaim]"), cr = e.target.closest("[data-cred]"), form = $("vaultForm");
+    if (cr) getCredential(cr.dataset.cred);
     if (r) confirmCard(form, `<p><strong>Renounce "${esc(r.dataset.label)}"?</strong> The badge is burned now and won't be minted to this wallet again unless you reclaim it. Your verified hours don't change.</p>`,
       "Renounce badge", () => send(form, "renounce", () => [r.dataset.renounce], badgesTarget).then(after(loadPassport)));
     if (rc) {
@@ -236,8 +243,9 @@
   };
   $("ppShare").onclick = async () => {
     if (!vaultOwner) return toast("Connect a wallet first.", "err");
-    const link = `${location.origin}${location.pathname}${location.search}#passport=${vaultOwner}`;
-    try { await navigator.clipboard.writeText(link); toast("Public passport link copied. It shows only public on-chain data.", "ok"); }
+    const withKey = profile.linkKey && Object.values(profile.visibility ?? {}).includes("link");
+    const link = `${location.origin}${location.pathname}${location.search}#passport=${vaultOwner}${withKey ? `&k=${profile.linkKey}` : ""}`;
+    try { await navigator.clipboard.writeText(link); toast(withKey ? "Share link copied. It includes your Link-visibility profile fields." : "Public passport link copied. It shows only public on-chain data.", "ok"); }
     catch { toast(link, "info"); }
   };
 
@@ -247,18 +255,18 @@
     const heads = [];
     const rows = await Promise.all(ids.map(async (id) => {
       const h = await c.ledger.headOf(id);
-      heads.push({ hours: Number(h.entryType) === 2 ? 0 : Number(h.hoursLogged), serviceDay: Number(h.serviceDay) });
       const [ev, org] = await Promise.all([h.eventId ? c.ledger.getFunction("getEvent")(h.eventId) : null, c.ledger.getOrg(h.orgId)]);
       const t = Number(h.entryType);
       const status = t === 2 ? ["bad", "Revoked"] : t === 1 ? ["warn", "Corrected"] : t === 3 ? ["neutral", "From V1"] : ["ok", "Valid"];
       const what = ev ? esc(ev.code) : `V1 record #${h.v1RecordId}`;
+      heads.push({ id: Number(id), hours: t === 2 ? 0 : Number(h.hoursLogged), serviceDay: Number(h.serviceDay), what: ev ? ev.code : `V1 record #${h.v1RecordId}`, org: org.name, area: CATS[Number(h.category)], status: status[1] });
       return `<li class="ir"><span class="vd ${status[0] === "ok" ? "valid" : status[0] === "warn" ? "corrected" : status[0] === "bad" ? "revoked" : "notfound"}" aria-hidden="true"></span>
         <div class="ir-main"><strong>${what}</strong><span>${esc(org.name)} · ${CATS[Number(h.category)]} · record #${id}${h.id !== id ? ` → #${h.id}` : ""}</span></div>
         <span class="badge ${status[0]}">${status[1]}</span><strong class="ir-h">${t === 2 ? 0 : h.hoursLogged}h</strong>
         <span class="ir-proof">${ENTRY2[t]}${h.reason !== ethers.ZeroHash ? " · " + esc(ethers.decodeBytes32String(h.reason)) : ""}</span></li>`;
     }));
     $("ppRecords").innerHTML = rows.join("");
-    return heads;
+    return heads.sort((a, b) => a.id - b.id);
   }
 
   // ---------- Issuance ----------
@@ -525,9 +533,9 @@
   let ciToken = null, ciShift = null;
   function v2FromHash() {
     const m = /^#checkin=([\w-]+\.(?:in|out)\.\d+\.[\w-]+)$/.exec(location.hash);
-    const pp = /^#passport=(0x[0-9a-fA-F]{40})$/.exec(location.hash);
+    const pp = /^#passport=(0x[0-9a-fA-F]{40})(?:&k=([\w-]{8,64}))?$/.exec(location.hash);
     if (m) { ciToken = m[1]; showPage("checkin"); }
-    else if (pp) { viewAddr = ethers.getAddress(pp[1]); $("passport").hidden ? showPage("passport") : loadPassport(); }
+    else if (pp) { viewAddr = ethers.getAddress(pp[1]); viewKey = pp[2] ?? null; $("passport").hidden ? showPage("passport") : loadPassport(); }
     return !!(m || pp);
   }
   async function loadCheckin() {
@@ -741,23 +749,252 @@
   $("opOpen").onchange = () => { opFilter.open = $("opOpen").checked; renderOpps(); };
   $("opEvent").onclick = () => { opFilter.event = null; renderOpps(); };
 
+  // ---------- Stage 5: credentials, private profile, transcript, impact reports, auditor console ----------
+  async function idxFetch(path, auth) {
+    const headers = auth ? { authorization: "Bearer " + (await ensureSession()).token } : {};
+    let r;
+    try { r = await fetch(IDX + path, { headers }); } catch { throw new Error(`The indexer at ${IDX} is not reachable. Start it with "node server/indexer.js".`); }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `The indexer answered with an error (${r.status}).`);
+    return j;
+  }
+  const download = (name, text, type) => Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  // CSV cell: quoted, and a leading = + - @ is neutralised so spreadsheets don't run it as a formula
+  const csvq = (v) => `"${String(v).replace(/^([=+\-@])/, "'$1").replace(/"/g, '""')}"`;
+
+  // ----- Open Badges 3.0 credential for one badge -----
+  async function getCredential(tokenId) {
+    const msg = $("vaultForm").querySelector(".msg");
+    msg.className = "msg";
+    msg.textContent = (await signedIn()) ? "Issuing…" : "Sign the sign-in message in your wallet (free, no transaction)…";
+    try {
+      const { jwt, credential } = await api("/credentials", { method: "POST", body: { tokenId } });
+      const a = download(`proofhours-badge-${tokenId}.jwt`, jwt, "application/jwt");
+      msg.className = "msg ok";
+      msg.innerHTML = `${ICON.check}<span><strong>Open Badges 3.0 credential issued for badge #${tokenId}.</strong> <a href="${a.href}" download="${a.download}" id="credDl" data-jwt="${jwt}">Download .jwt</a>
+        <details class="cred-json"><summary>Show the credential</summary><pre>${esc(JSON.stringify(credential, null, 2))}</pre></details>
+        It stays valid while the badge is held; anyone can check it on the Verify page.</span>`;
+    } catch (err) { logError("credential", err); msg.className = "msg err"; msg.textContent = declined(err); }
+  }
+  $("credForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const msg = e.target.querySelector(".msg");
+    if (!API) { msg.className = "msg err"; msg.textContent = `Credential checks need the ProofHours service, which isn't running for ${C.netName} yet.`; return; }
+    msg.className = "msg";
+    msg.textContent = "Checking…";
+    try {
+      const v = await api("/credentials/verify", { method: "POST", auth: false, body: { jwt: $("credJwt").value.trim() } });
+      msg.className = "msg " + (v.valid ? "ok" : "err");
+      msg.innerHTML = `<strong>${v.valid ? "Valid credential" : "Not valid"}</strong>${v.achievement ? ` · ${esc(v.achievement)} for <code>${esc(v.subject ?? "")}</code>` : ""}
+        <ul class="checks">${v.checks.map((c) => `<li class="${c.ok ? "ok" : "bad"}">${c.ok ? "✓" : "✗"} ${esc(c.what)}</li>`).join("")}</ul>`;
+    } catch (err) { msg.className = "msg err"; msg.textContent = err.message; }
+  };
+
+  // ----- private profile (encrypted vault) -----
+  let profile = { fields: {}, visibility: {}, linkKey: null };
+  const PF = [["displayName", "pfName"], ["school", "pfSchool"], ["bio", "pfBio"]];
+  function showProfile(p) {
+    profile = p;
+    PF.forEach(([f, id]) => { $(id).value = p.fields?.[f] ?? ""; $(id + "Vis").value = p.visibility?.[f] ?? "private"; });
+    $("pfLoad").textContent = "Reload";
+  }
+  async function renderProfile(own, me) {
+    $("profileForm").hidden = !(own && API);
+    $("ppProfileView").hidden = true;
+    if (own && API) { if (await signedIn()) showProfile(await api("/profile").catch(() => profile)); return; }
+    if (!own && API && me) {
+      const shared = await api(`/profile/public/${me}${viewKey ? `?k=${encodeURIComponent(viewKey)}` : ""}`, { auth: false }).catch(() => ({ fields: {} }));
+      const parts = [shared.fields.displayName, shared.fields.school, shared.fields.bio].filter(Boolean);
+      $("ppProfileView").hidden = !parts.length;
+      $("ppProfileView").innerHTML = `${ICON.info}<div><strong>Shared by this volunteer:</strong> ${parts.map(esc).join(" · ")} <span class="small muted">(off-chain profile, not verified by NGOs)</span></div>`;
+    }
+  }
+  $("profileForm").onsubmit = (e) => {
+    e.preventDefault();
+    act(e.target, async () => showProfile(await api("/profile", { method: "PUT", body: {
+      fields: Object.fromEntries(PF.map(([f, id]) => [f, $(id).value])), visibility: Object.fromEntries(PF.map(([f, id]) => [f, $(id + "Vis").value])) } })) ?? profile,
+    () => "<strong>Profile saved, encrypted.</strong> Fields set to Link are visible to people you send your share link to.");
+  };
+  $("pfLoad").onclick = () => act($("profileForm"), async () => { showProfile(await api("/profile")); return profile; }, () => "Profile loaded.");
+  $("pfDelete").onclick = () => confirmCard($("profileForm"), "<p><strong>Delete your profile?</strong> Its encryption key is destroyed, so the data can't be recovered by anyone, including from backups. Your on-chain hours and badges are not affected.</p>",
+    "Delete profile", () => act($("profileForm"), async () => { await api("/profile", { method: "DELETE" }); showProfile({ fields: {}, visibility: {}, linkKey: null }); return true; }, () => "<strong>Profile erased.</strong> The key is destroyed; the data is unrecoverable."));
+
+  // ----- printable transcript (Save as PDF from the print dialog) -----
+  let lastPassport = null;
+  $("ppPrint").onclick = () => {
+    const P = lastPassport;
+    if (!P) return toast("Connect a wallet or open a passport first.", "err");
+    const link = `${location.origin}${location.pathname}${location.search}#passport=${P.me}`;
+    const qr = qrcode(0, "M");
+    qr.addData(link);
+    qr.make();
+    const name = P.own ? profile.fields?.displayName : null;
+    $("transcriptView").innerHTML = `<header class="tr-head"><div><h1>Co-curricular volunteering transcript</h1>
+        <p>${name ? `<strong>${esc(name)}</strong> · ` : ""}wallet <code>${P.me}</code></p>
+        <p>Generated ${new Date().toLocaleString()} · ${esc(C.netName)} (chain ${C.chainId}) · ProofHoursLedger <code>${V2.ledger}</code></p></div>
+        <div class="tr-qr">${qr.createSvgTag({ cellSize: 3, margin: 2, scalable: true })}<small>Scan to verify live</small></div></header>
+      <h2>Verified hours: ${P.total}</h2>
+      <table><thead><tr><th>Impact area</th><th>Verified hours</th></tr></thead><tbody>${CATS.map((c, i) => `<tr><td>${c}</td><td>${P.catH[i]}h</td></tr>`).join("")}</tbody></table>
+      <h2>Records</h2>
+      <table><thead><tr><th>Record</th><th>Event</th><th>NGO</th><th>Area</th><th>Service date</th><th>Status</th><th>Hours</th></tr></thead>
+        <tbody>${P.records.map((r) => `<tr><td>#${r.id}</td><td>${esc(r.what)}</td><td>${esc(r.org)}</td><td>${r.area}</td><td>${r.serviceDay ? dateOf(r.serviceDay) : "V1 import"}</td><td>${r.status}</td><td>${r.hours}h</td></tr>`).join("") || `<tr><td colspan="7">No records.</td></tr>`}</tbody></table>
+      <h2>Soulbound badges</h2><p>${P.badges.map(esc).join(" · ") || "None yet."}</p>
+      <footer>Every figure is read from the ProofHours ledger. Hours come only from accredited NGOs; the latest entry of each record counts, so corrections and revocations are applied. Check it live: ${esc(link)}</footer>`;
+    document.body.classList.add("print-transcript");
+    $("transcriptView").hidden = false;
+    window.print();
+  };
+  window.addEventListener("afterprint", () => { document.body.classList.remove("print-transcript"); $("transcriptView").hidden = true; });
+
+  // ----- impact reports -----
+  async function loadReports() {
+    const c = await available("rpNotice", "rpBody");
+    if (!c) return;
+    if (!IDX) {
+      $("rpNotice").innerHTML = `${ICON.info}<div><strong>Impact reports aren't available for ${esc(C.netName)} yet.</strong> They come from the indexer, which runs locally for now (<code>node server/indexer.js</code>, then open this page with <code>?local</code>).</div>`;
+      $("rpNotice").hidden = false;
+      $("rpBody").hidden = true;
+      return;
+    }
+    const orgs = await idxFetch("/reports/orgs"), keep = $("rpOrg").value;
+    $("rpOrg").innerHTML = orgs.length ? orgs.map((o) => `<option value="${o.id}">${esc(o.name)}${o.suspended ? " (suspended)" : ""}</option>`).join("") : `<option value="">No NGOs indexed yet</option>`;
+    if (keep) $("rpOrg").value = keep;
+  }
+  $("reportForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const msg = e.target.querySelector(".msg");
+    msg.className = "msg";
+    msg.textContent = "Building…";
+    try {
+      const qs = new URLSearchParams();
+      if ($("rpFrom").value) qs.set("from", $("rpFrom").value);
+      if ($("rpTo").value) qs.set("to", $("rpTo").value);
+      const r = await idxFetch(`/reports/org/${$("rpOrg").value}?${qs}`);
+      if (!r.org) throw new Error("Choose an NGO.");
+      const period = `${r.from ? dateOf(r.from) : "the start"} to ${r.to < 1e8 ? dateOf(r.to) : "today"}`;
+      const csv = ["NGO,Period,Impact area,Verified hours,Records", ...r.byCategory.map((x) => [csvq(r.org.name), csvq(period), csvq(x.name), x.hours, x.records].join(",")), [csvq(r.org.name), csvq(period), csvq("Total"), r.totalHours, r.records].join(",")].join("\n");
+      const a = download(`proofhours-ngo-${r.org.id}-report.csv`, csv, "text/csv");
+      $("rpOut").hidden = false;
+      $("rpOut").innerHTML = `<div class="panel-head"><h3>${esc(r.org.name)}</h3><span class="hint">service dates ${period}</span></div>
+        <div class="rp-totals"><div><strong>${r.totalHours}</strong><span>verified hours</span></div><div><strong>${r.records}</strong><span>records</span></div><div><strong>${r.events}</strong><span>events</span></div><div><strong>${r.corrected} / ${r.revoked}</strong><span>corrected / revoked</span></div></div>
+        <div class="table-wrap"><table class="table"><thead><tr><th>Impact area</th><th>Verified hours</th><th>Records</th></tr></thead><tbody>${r.byCategory.map((x) => `<tr><td>${x.name}</td><td>${x.hours}h</td><td>${x.records}</td></tr>`).join("")}</tbody></table></div>
+        <p class="small muted">Read from the indexer, which mirrors the ledger. Hours only: no volunteer is identified. Records imported from V1 aren't attributed to an NGO here.</p>
+        <a class="btn btn-ghost sm" id="rpCsv" href="${a.href}" download="${a.download}">Download CSV</a>`;
+      msg.className = "msg ok";
+      msg.innerHTML = `${ICON.check}<span>Report built.</span>`;
+    } catch (err) { msg.className = "msg err"; msg.textContent = err.message; }
+  };
+
+  // ----- auditor console -----
+  const RULE_NAMES = { "large-single": "Large single issuance", spike: "Issuance spike", "correction-rate": "High correction rate", backdated: "Back-dated issuance" };
+  const OUTCOME_NAMES = { dismissed: "dismissed, no issue found", "referred-to-governance": "referred to governance for revocation", "org-suspended": "NGO suspended" };
+  let auditCases = [];
+  async function loadAudit() {
+    const c = await available("auNotice", "auBody");
+    if (!c) return;
+    if (!API || !IDX) {
+      $("auNotice").innerHTML = `${ICON.info}<div><strong>The auditor console isn't available for ${esc(C.netName)} yet.</strong> It needs the indexer and the ProofHours service, which run locally for now.</div>`;
+      $("auNotice").hidden = false;
+      $("auBody").hidden = true;
+      return;
+    }
+    const me = await currentAccount(), isAud = me ? await c.ledger.hasRole(ethers.id("AUDITOR_ROLE"), me) : false;
+    $("auContext").className = "banner " + (isAud ? "ok" : "warn");
+    $("auContext").innerHTML = !me ? `${ICON.alert}<div><strong>No wallet connected.</strong> Connect the wallet that holds the auditor role.</div>`
+      : !isAud ? `${ICON.alert}<div><strong>${short(me)} doesn't hold the auditor role.</strong> Alerts, samples and cases are refused for it.</div>`
+      : `${ICON.shield}<div>Auditor wallet <strong>${short(me)}</strong>. You can suspend an NGO; only governance can reinstate it or revoke records.</div>`;
+    if (await signedIn()) await refreshAudit().catch((e) => toast(declined(e), "err"));
+  }
+  async function refreshAudit() {
+    const [alerts, cases] = await Promise.all([idxFetch("/audit/alerts", true), api("/cases")]);
+    auditCases = cases;
+    $("auLoad").textContent = "Refresh";
+    $("auAlerts").innerHTML = alerts.length ? alerts.map((a) => `<li class="shift"><div><strong>${esc(RULE_NAMES[a.rule] ?? a.rule)} · ${esc(a.org)}</strong><br><span>${esc(a.detail)}</span><br><span class="badge warn">Allegation · needs human review</span></div>
+        <div class="shift-actions"><button type="button" class="btn btn-ghost sm" data-case-subject="${esc(`alert ${a.id}: ${RULE_NAMES[a.rule] ?? a.rule}`)}" data-case-org="${a.orgId ?? ""}" data-case-note="${esc(a.detail)}">Open case</button></div></li>`).join("")
+      : `<li class="muted small">No alerts: the rules found nothing to review.</li>`;
+    renderCases();
+  }
+  function renderCases() {
+    $("auCases").innerHTML = auditCases.length ? auditCases.map((c) => `<li class="case" data-case="${c.id}">
+      <div class="case-head"><strong>Case #${c.id} · ${esc(c.subject)}</strong><span class="badge ${c.status === "open" ? "warn" : "neutral"}">${c.status === "open" ? "Open" : "Closed: " + esc(OUTCOME_NAMES[c.outcome] ?? c.outcome)}</span></div>
+      <ol class="case-notes">${c.notes.map((n) => `<li><span class="mono">${fmt(n.at)} · ${short(n.by)}</span> ${esc(n.text)}${n.txHash ? ` · ${txLinks(n.txHash)}` : ""}</li>`).join("")}</ol>
+      <div class="case-actions">${c.status === "open" ? `<input data-note placeholder="What did you check, or why you decided" maxlength="2000" aria-label="Note for case ${c.id}">
+        <button type="button" class="btn btn-ghost sm" data-act="note">Add note</button>
+        <select data-outcome aria-label="Outcome for case ${c.id}"><option value="dismissed">Dismiss: no issue found</option><option value="referred-to-governance">Refer to governance for revocation</option><option value="org-suspended">NGO suspended</option></select>
+        <button type="button" class="btn btn-ghost sm" data-act="close">Close case</button>
+        ${c.orgId ? `<button type="button" class="btn btn-danger sm" data-act="suspend">Suspend NGO #${c.orgId} on-chain</button>` : ""}` : ""}
+        <button type="button" class="btn btn-ghost sm" data-act="export">Export evidence</button></div></li>`).join("")
+      : `<li class="muted small">No cases yet. Open one from an alert or a sampled record.</li>`;
+  }
+  const caseMsg = (ok, html) => { const m = $("caseForm").querySelector(".msg"); m.className = "msg " + (ok ? "ok" : "err"); m.innerHTML = ok ? `${ICON.check}<span>${html}</span>` : esc(html); };
+  async function openCase(b) {
+    try {
+      const c = await api("/cases", { method: "POST", body: { subject: b.dataset.caseSubject, orgId: b.dataset.caseOrg ? Number(b.dataset.caseOrg) : null, note: b.dataset.caseNote } });
+      auditCases = [c, ...auditCases];
+      renderCases();
+      caseMsg(true, `<strong>Case #${c.id} opened.</strong> Record what you check before deciding.`);
+    } catch (e) { caseMsg(false, declined(e)); }
+  }
+  $("auLoad").onclick = async () => { $("auLoad").disabled = true; try { await ensureSession(); await refreshAudit(); } catch (e) { toast(declined(e), "err"); } finally { $("auLoad").disabled = false; } };
+  $("auAlerts").onclick = (e) => { const b = e.target.closest("[data-case-subject]"); if (b) openCase(b); };
+  $("smList").onclick = (e) => { const b = e.target.closest("[data-case-subject]"); if (b) openCase(b); };
+  $("sampleForm").onsubmit = (e) => {
+    e.preventDefault();
+    act(e.target, async () => {
+      const seed = $("smSeed").value.trim(), s = await idxFetch(`/audit/sample?rate=${$("smRate").value}${seed ? `&seed=${seed}` : ""}`, true);
+      const c = await contracts(), recs = await Promise.all(s.records.map((id) => c.ledger.getRecord(id)));
+      $("smList").innerHTML = recs.map((r) => `<li class="shift"><div><strong>Record #${r.id}</strong><br><span>${r.hoursLogged}h ${CATS[Number(r.category)]} · NGO #${r.orgId} · service ${r.serviceDay ? dateOf(r.serviceDay) : "V1 import"}</span></div>
+        <div class="shift-actions"><button type="button" class="btn btn-ghost sm" data-case-subject="sample record #${r.id}" data-case-org="${r.orgId}" data-case-note="Spot audit (seed ${s.seed.slice(0, 10)}…, rate ${s.rate * 100}%): check the evidence for record #${r.id}.">Open case</button></div></li>`).join("") || `<li class="muted small">No records fell in this sample.</li>`;
+      return s;
+    }, (s) => `Sample: <strong>${s.records.length}</strong> of ${s.population} records at ${s.rate * 100}%. Seed <code title="${s.seed}">${short(s.seed)}</code>: the same seed always draws the same sample.`);
+  };
+  $("auCases").onclick = async (e) => {
+    const b = e.target.closest("[data-act]"), li = e.target.closest("[data-case]");
+    if (!b || !li) return;
+    const id = Number(li.dataset.case), c = auditCases.find((x) => x.id === id), note = li.querySelector("[data-note]")?.value.trim();
+    const update = (u) => { auditCases = auditCases.map((x) => (x.id === u.id ? u : x)); renderCases(); };
+    try {
+      if (b.dataset.act === "note") { if (!note) throw new Error("Write the note first."); update(await api(`/cases/${id}/note`, { method: "POST", body: { text: note } })); caseMsg(true, "Note added."); }
+      if (b.dataset.act === "close") {
+        if (!note) throw new Error("Write the reason for your decision in the note box first.");
+        update(await api(`/cases/${id}/close`, { method: "POST", body: { outcome: li.querySelector("[data-outcome]").value, note } }));
+        caseMsg(true, `<strong>Case #${id} closed.</strong>`);
+      }
+      if (b.dataset.act === "export") {
+        const bundle = await api(`/cases/${id}/export`);
+        download(`proofhours-case-${id}.json`, JSON.stringify(bundle, null, 2), "application/json").click();
+        caseMsg(true, `Evidence for case #${id} exported (SHA-256 <code>${bundle.sha256.slice(0, 16)}…</code>).`);
+      }
+      if (b.dataset.act === "suspend") {
+        confirmCard($("caseForm"), `<p><strong>Suspend NGO #${c.orgId}?</strong> Your auditor wallet sends <code>suspendOrg</code>. The NGO can't issue, correct or approve until governance reinstates it.</p>`, "Suspend NGO", async () => {
+          const receipt = await send($("caseForm"), "suspendOrg", () => [c.orgId], ledgerTarget);
+          if (!receipt) return;
+          update(await api(`/cases/${id}/note`, { method: "POST", body: { text: `Suspended NGO #${c.orgId} on-chain.`, txHash: receipt.hash } }));
+        });
+      }
+    } catch (err) { caseMsg(false, declined(err)); }
+  };
+  Object.assign(TX_LABEL, { suspendOrg: "Suspend NGO" });
+
   // ----- Role pill (app.js): V2 roles next to V1 roles -----
   window.v2Role = async (account) => {
     if (!V2) return null;
     try {
       const c = await contracts();
       if ((await c.ledger.runner.getCode(V2.ledger)) === "0x") return null;
-      const [org, opted] = await Promise.all([c.ledger.coordinatorOrg(account), c.ledger.optedIn(account)]);
-      return { org: org ? (await c.ledger.getOrg(org)).name : null, opted };
+      const [org, opted, auditor] = await Promise.all([c.ledger.coordinatorOrg(account), c.ledger.optedIn(account), c.ledger.hasRole(ethers.id("AUDITOR_ROLE"), account)]);
+      return { org: org ? (await c.ledger.getOrg(org)).name : null, opted, auditor };
     } catch (e) { console.warn("V2 role lookup failed", e); return null; }
   };
 
+  PAGE_LOAD.reports = () => { loadReports().catch((e) => toast(declined(e), "err")); };
+  PAGE_LOAD.audit = () => { loadAudit().catch((e) => toast(declined(e), "err")); };
   PAGE_LOAD.attend = () => { loadAttendance().catch((e) => toast(declined(e), "err")); };
   PAGE_LOAD.checkin = () => { loadCheckin().catch((e) => toast(declined(e), "err")); };
   PAGE_LOAD.opps = () => { loadOpps().catch((e) => { logError("opportunities", e); $("opList").innerHTML = `<li class="msg err">${esc(declined(e))}</li>`; }); };
   window.addEventListener("hashchange", v2FromHash);
   // the sidebar's "My passport" always means your own wallet
-  document.querySelector('.nav-item[data-page="passport"]').addEventListener("click", () => { if (viewAddr) { viewAddr = null; history.replaceState(null, "", location.pathname + location.search); loadPassport(); } });
+  document.querySelector('.nav-item[data-page="passport"]').addEventListener("click", () => { if (viewAddr) { viewAddr = viewKey = null; history.replaceState(null, "", location.pathname + location.search); loadPassport(); } });
   if (!$("shStart").value) { const d = new Date(); d.setMinutes(0, 0, 0); $("shStart").value = localInput(d); d.setHours(d.getHours() + 3); $("shEnd").value = localInput(d); }
 
   PAGE_LOAD.passport = loadPassport;
@@ -767,6 +1004,7 @@
     if (!$("issue2").hidden) loadIssuance();
     if (!$("attend").hidden) loadAttendance();
     if (!$("checkin").hidden) loadCheckin();
+    if (!$("audit").hidden) loadAudit();
   });
   v2FromHash(); // last: every page loader above must be registered first (direct #passport= / #checkin= links)
 })();
