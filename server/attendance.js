@@ -173,6 +173,8 @@ function createApp({ db, chain, secret, chainId, now = () => Date.now() }) {
       return q("SELECT * FROM shifts WHERE org_id = ? ORDER BY start_at DESC, id DESC").all(org).map(shiftView);
     },
     "GET /shifts/:id": ({ id }) => shiftView(shiftById(id)), // public: event, times, capacity, site area; no attendee data
+    // Public directory of shifts that haven't ended: times, capacity, spots taken. No attendee identities.
+    "GET /opportunities": () => q("SELECT * FROM shifts WHERE end_at > ? ORDER BY start_at, id LIMIT 200").all(t()).map(shiftView),
 
     "GET /shifts/:id/qr": async ({ req, id, url }) => {
       const s = shiftById(id);

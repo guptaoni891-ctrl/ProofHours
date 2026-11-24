@@ -80,6 +80,18 @@ test("shifts: only the event's own NGO coordinator; times validated", async (t) 
   assert.equal((await s.call("GET", "/shifts", s.tok.coord)).body.length, 1);
 });
 
+test("opportunities: public list of shifts that haven't ended, with spots taken and no attendee data", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  const a = await s.shift(), b = await s.shift({ eventId: 2, start: sec(T0) + 3600, end: sec(T0) + 2 * 3600 });
+  await s.call("POST", "/checkin", s.tok.vol, { token: await s.qr(a.id) });
+  const list = (await s.call("GET", "/opportunities")).body; // no sign-in needed
+  assert.deepEqual(list.map((o) => [o.id, o.attending, o.capacity]), [[a.id, 1, 10], [b.id, 0, 10]]);
+  assert.ok(!JSON.stringify(list).includes(s.vol.address), "no volunteer wallets");
+  await s.advance(5 * 3600, true);
+  assert.deepEqual((await s.call("GET", "/opportunities")).body, [], "ended shifts drop off");
+});
+
 test("QR codes: forged, wrong kind, expired and replayed codes are refused", async (t) => {
   const s = await setup();
   t.after(s.close);
