@@ -98,18 +98,18 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 | M6.5 | Gas sponsorship (paymaster) | P1 | none | Gasless send | Paymaster integration | Selector allowlist | Pimlico / Coinbase paymaster (vendor) | Stage 6 | Spend caps enforced | Blocked (vendor account) |
 | M6.6 | Grant and Form 990 report pack | P2 | none | Export | Report generator | none | none | M10 | Values labelled estimates | Not Started |
 | M6.7 | Corporate "Dollars for Doers" eligibility packet | P2 | none | Claim packet | Employer directory | none | Grant directory (vendor) | M10 | Never claims a grant is earned | Blocked (directory data, legal) |
-| M6.8 | NGO activity and performance reporting | P2 | none | Dashboard | Aggregates | none | none | M11 | Matches chain | Not Started |
+| M6.8 | NGO activity and performance reporting | P2 | none | Impact reports page: NGO, period, totals, by area, corrected/revoked, CSV ✓ | Indexer `GET /reports/org/:id` from the record index (no volunteer data) ✓ | none | none | M11 | Report total equals the ledger ✓ (S-IDX, E2E-TRUST) | Tested (local) |
 | M6.9 | Strict NGO-specific permissions | P1 | none | none | none | L org scoping ✓ | none | none | Other NGO can't issue, correct or revoke ✓ (F-V2) | Tested |
 
 ## M7: Auditor and compliance console
 
 | ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| M7.1 | Anomaly radar: >12h/day, overlapping shifts, issuance spikes, large one-time issuance; alerts are allegations | P1 | L caps ✓ (preventive) | Console with a quarantine queue | Rule engine over indexed data | none | none | M11 | Alert never auto-penalises; review required | Not Started |
-| M7.2 | Random 2–5% spot-audit sampling, evidence queue | P2 | none | Queue | Sampler, evidence links | none | none | M2, M11 | Sample reproducible | Not Started |
-| M7.3 | Disputes, NGO suspension and credential revocation proposals, multisig approval | P2 | none | Dispute workflow | Case records | L `suspendOrg` (auditor) ✓, governance-only `reinstateOrg` / `unpause` / revoke ✓ | Safe multisig | M12.2 | Auditor can't reinstate or unpause ✓ (F-V2) | In Progress |
+| M7.1 | Anomaly radar: >12h/day, overlapping shifts, issuance spikes, large one-time issuance; alerts are allegations | P1 | L caps ✓ (preventive) | Auditor console alert list, each labelled "Allegation · needs human review", with Open case ✓ | Indexer rules: large single record (≥12h), NGO daily spike (>max(50h, 3× 30-day median)), correction/revocation rate (≥20% of ≥10), back-dated issuance (>30 days) ✓. >12h/day and overlaps are prevented upstream, not detected | none | none | M11 | Alerts change nothing on their own ✓ (E2E-TRUST); auditor role required ✓ (S-IDX) | Tested (local) |
+| M7.2 | Random 2–5% spot-audit sampling, evidence queue | P2 | none | Sample panel (rate, seed), Open case per record ✓ | Pick = keccak256(seed, recordId) under the rate; default seed = latest indexed block hash ✓ | none | none | M2, M11 | Same seed → same sample ✓ (S-IDX, E2E-TRUST) | Tested (local) |
+| M7.3 | Disputes, NGO suspension and credential revocation proposals, multisig approval | P2 | none | Cases with notes and outcomes (dismissed / referred to governance / NGO suspended); suspend NGO from the auditor's wallet ✓ | Case records; "NGO suspended" accepted only once the chain shows it; evidence export with SHA-256 ✓ | L `suspendOrg` (auditor) ✓, governance-only `reinstateOrg` / `unpause` / revoke ✓ | Safe multisig | M12.2 | Auditor can't reinstate or unpause ✓ (F-V2); suspension end to end ✓ (E2E-TRUST). Revocation referrals go to governance, whose multisig is Blocked | In Progress (multisig Blocked) |
 | M7.4 | Dedicated auditor role | P1 | none | Console access | none | L `AUDITOR_ROLE` ✓ | none | none | F-V2 ✓ | Implemented |
-| M7.5 | Break-glass access log with typed justification (App. A #29) | P2 | none | Justification prompt | Immutable access log | none | none | M9 | Every restricted view logged | Not Started |
+| M7.5 | Break-glass access log with typed justification (App. A #29) | P2 | none | none | none | none | none | M9 | Every restricted view logged | **Not needed yet:** auditors have no access to private profile data at all; revisit if such access is ever added |
 
 ## M8: Soulbound token system
 
@@ -120,16 +120,16 @@ Source: *Gamified Volunteer SBT Discovery Plan* ("CivicQuest", 85 pages). Produc
 | M8.3 | ERC-5484 consensual: `burnAuth` = Both, consent before mint, holder renounce/reclaim | P1 | none | Renounce (with confirmation) and Reclaim in the vault; reclaim re-mints via `resyncBadges` ✓ | none | B `burnAuth`, `renounce`, `reclaim`; L `optIn`, `resyncBadges` ✓ | none | none | F-V2 ✓; E2E-GAME renounce burns, reclaim re-mints, hours unchanged ✓ | Tested (local) |
 | M8.4 | Dynamic evolving badge artwork | P1 | none | Vault renders on-chain SVG ✓ | none | B on-chain JSON + SVG (tier ring) ✓ | none | none | F-V2 `tokenURI` decodes ✓ | Tested |
 | M8.5 | Pinned immutable assets (IPFS) | P1 | none | none | none | none | none | Stage 5 | CID stable | **Deferred:** nothing needs pinning yet (badge art is generated on-chain). Built with OB3 evidence in Stage 5 |
-| M8.6 | Open Badges 3.0 / W3C VC 2.0 credential generation and validation, Status List, LinkedIn sharing | P2 | none | Export and share | Issuer key (KMS) / DID, signer, status list | none | 1EdTech validator | Stage 5 | OB3 validates; revocation reflected | Not Started |
+| M8.6 | Open Badges 3.0 / W3C VC 2.0 credential generation and validation, Status List, LinkedIn sharing | P2 | none | "Credential" per badge (download .jwt, view JSON); Verify page checks a pasted credential ✓ | VC-JWT (EdDSA, did:key issuer), OpenBadgeCredential, did:pkh subject, Bitstring Status List that marks a credential revoked once its badge isn't held ✓ | none | 1EdTech validator (external) | Stage 5 | Signature, issuer, OB3 structure and revocation checked locally ✓ (S-TRUST, E2E-TRUST). **Not run through the 1EdTech validator** (external service; needs approval). Issuer key is derived locally (KMS Blocked). LinkedIn not built | In Progress |
 
 ## M9: Risk, privacy and regulatory tools
 
 | ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
 | M9.1 | NGO KYB and charity-registry gate before issuer role | P2 | L `registerOrg` (governance) ✓ | Verification workflow | Registry adapters | none | CharityAPI, Candid, Sumsub, CDA/IACAD | Stage 5 | Unverified NGO can't get issuer rights | Blocked (vendor accounts, legal) |
-| M9.2 | Encrypted off-chain identity vault, erasure (crypto-shredding), unlinking | P2 | none | Account settings | Encrypted Postgres, per-user keys (KMS) | none | KMS | Stage 5 | After erasure, PII unrecoverable; chain holds none | Not Started |
-| M9.3 | Consent and selective disclosure: Public / Link-only / Private per category | P2 | L opt-in ✓ | Disclosure matrix | Profile visibility | none | none | M3.1 | Private data never served | In Progress |
-| M9.4 | Data retention, restricted access, auditor access logs, key management | P2 | none | none | Policies, logs | none | KMS | M9.2 | Tests per policy | Not Started |
+| M9.2 | Encrypted off-chain identity vault, erasure (crypto-shredding), unlinking | P2 | none | Private profile on your passport; Delete with confirmation ✓ | AES-256-GCM per volunteer, data key wrapped by a master key and kept in a separate key database; erasure destroys the key ✓ | none | KMS (Blocked: local derived master key) | Stage 5 | After erasure the data, including a backup copy, can't be decrypted ✓ (S-TRUST, E2E-TRUST) | Tested (local) |
+| M9.3 | Consent and selective disclosure: Public / Link-only / Private per category | P2 | L opt-in ✓ | Per-field visibility for profile fields; share link carries a key for Link fields ✓ | `GET /profile/public/:wallet` serves only what visibility allows ✓ | none | none | M3.1 | Private fields never served ✓ (S-TRUST, E2E-TRUST). Per-category cloaking of on-chain hours **declined**: on-chain data is public, and hiding it in our UI would only pretend otherwise | In Progress |
+| M9.4 | Data retention, restricted access, auditor access logs, key management | P2 | none | none | Keys stored apart from data ✓; cases record who did what ✓ | none | KMS | M9.2 | Erasure test ✓; retention periods need legal input | In Progress (policy needs legal review) |
 | M9.5 | No personal data on-chain | P1 | V1 commitments ✓ | none | none | L stores only addresses, hours, hashes ✓ | none | none | Code review ✓; see security model | Implemented |
 
 Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a DPIA, which are **Blocked (legal)**.
@@ -138,10 +138,10 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 
 | ID | Requirement | Pri | Reuse | Front end | Backend | Contract | Data / integrations | Depends on | Acceptance tests | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| M10.1 | University co-curricular transcript: PDF with QR and verification reference (CLR 2.0) | P2 | V1 print report ✓ | Transcript view | PDF generator | none | none | M11 | QR resolves to live verification | In Progress (V1 print only) |
-| M10.2 | NGO, ESG and CSR impact packs by category, period and NGO | P2 | none | Reports | Aggregates | none | none | M11 | Totals match chain | Not Started |
-| M10.3 | Benchmark civic-value figures, always labelled estimates | P2 | none | Labels | Configurable rates | none | none | none | Never presented as money earned | Not Started |
-| M10.4 | Exportable audit evidence | P2 | none | Export | Evidence bundles | none | none | M7 | Bundle hashes verify | Not Started |
+| M10.1 | University co-curricular transcript: PDF with QR and verification reference (CLR 2.0) | P2 | V1 print report ✓ | "Print transcript" → print view (Save as PDF): totals by area, records, badges, optional display name, QR to the live passport ✓ | none | none | none | M11 | QR resolves to live verification ✓ (E2E-TRUST). CLR 2.0 credential format not built | In Progress |
+| M10.2 | NGO, ESG and CSR impact packs by category, period and NGO | P2 | none | Impact reports page with CSV ✓ | Indexer reports ✓ | none | none | M11 | Totals match chain ✓ (S-IDX, E2E-TRUST) | Tested (local) |
+| M10.3 | Benchmark civic-value figures, always labelled estimates | P2 | none | Impact Twin label (Stage 4) ✓ | Configurable, sourced rate ✓ | none | none | none | Never presented as money earned ✓ (E2E-GAME) | Tested (local) |
+| M10.4 | Exportable audit evidence | P2 | none | "Export evidence" per case ✓ | Bundle with SHA-256 ✓ | none | none | M7 | Bundle hashes verify ✓ (S-TRUST) | Tested (local) |
 
 ## M11: Data and indexing
 
@@ -199,7 +199,7 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 | 8 | Near-me rival strip | M4.3 | 4 | Tested (local) |
 | 9 | Rotating 90 s HMAC-QR gate | M2.1 | 2 | Tested (local; 30 s rotation, ≤ 60 s validity) |
 | 10 | Geofence boolean proof | M2.2 | 2 | Tested (local) |
-| 11 | Anomaly radar | M7.1 | 5 | Not Started |
+| 11 | Anomaly radar | M7.1 | 5 | Tested (local) |
 | 12 | Peer-vouched micro-checkpoints | M2 | 6 | Not Started |
 | 13 | Offline scratch-card / SMS voucher | M2.5 | 6 | Not Started |
 | 14 | Emergency-response fast-track | M4.8 | later | Not Started |
@@ -214,13 +214,13 @@ Compliance claims: none. GDPR and UAE PDPL compliance needs legal review and a D
 | 23 | Returning-volunteer retention radar | none | later | Not Started |
 | 24 | No-show predictor and waitlist | none | later | Not Started |
 | 25 | Arcade ⇄ Verifier Clean skin switch | M3.2 | 4 | Tested (local, passport) |
-| 26 | Category cloaking and selective disclosure | M9.3 | 5 | Not Started |
-| 27 | One-click erasure (crypto-shredding) | M9.2 | 5 | Not Started |
+| 26 | Category cloaking and selective disclosure | M9.3 | 5 | In Progress (profile fields; cloaking public on-chain hours declined) |
+| 27 | One-click erasure (crypto-shredding) | M9.2 | 5 | Tested (local) |
 | 28 | ERC-5484 burn and guardian recovery | M8.3, wallet recovery | 6 | In Progress (burn ✓) |
-| 29 | Break-glass auditor access log | M7.5 | 5 | Not Started |
+| 29 | Break-glass auditor access log | M7.5 | 5 | Not needed yet (auditors can't access private data) |
 | 30 | Public NGO trust scorecard | M7 | 5 | Not Started |
-| 31 | LinkedIn Open Badges 3.0 push | M8.6 | 5 | Not Started |
-| 32 | Co-curricular transcript (CLR 2.0) | M10.1 | 5 | In Progress |
+| 31 | LinkedIn Open Badges 3.0 push | M8.6 | 5 | Not Started (credentials exist; LinkedIn integration not built) |
+| 32 | Co-curricular transcript (CLR 2.0) | M10.1 | 5 | In Progress (printable transcript with QR; CLR 2.0 format not built) |
 | 33 | Supervisor micro-endorsements | M3.4 | 5 | Not Started |
 | 34 | Course-credit milestone tracker | M10 | later | Not Started |
 | 35 | Alumni lifelong continuity (wallet migration) | wallet recovery | 6 | Not Started |

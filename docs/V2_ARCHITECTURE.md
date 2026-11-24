@@ -101,6 +101,20 @@ Pure functions shared by the page and the tests. Inputs are only the ledger's to
 
 **Arcade / Clean:** the passport's game layer is hidden in Clean view (the choice is remembered per browser); public passports open in Clean.
 
+### Trust and interoperability (Stage 5)
+
+| Piece | Where | Design |
+|---|---|---|
+| Record index | Indexer | Issuance, correction, revocation and V1-import logs, stored **without** the volunteer field. Effective hours = latest entry of each original. |
+| Anomaly alerts | Indexer `GET /audit/alerts` (auditor sign-in) | Large single record, NGO daily spike, correction/revocation rate, back-dated issuance. Each is an allegation; nothing acts on it automatically. |
+| Spot-audit sample | Indexer `GET /audit/sample` | keccak256(seed, recordId) under a 2–5% rate; the seed (default: latest indexed block hash) reproduces the sample. |
+| Auditor sign-in | Shared | The attendance service issues the session; the indexer checks it with the same `ATTENDANCE_SECRET` and requires `AUDITOR_ROLE` on the ledger. |
+| Cases | Attendance service | Notes, outcomes, evidence export with SHA-256. "NGO suspended" is accepted only once the chain shows the suspension, which the auditor's own wallet sends. |
+| Open Badges 3.0 | Attendance service | OpenBadgeCredential (VC 2.0 + OB 3.0 contexts) as a VC-JWT signed with Ed25519; issuer `did:key`, subject `did:pkh`; Bitstring Status List computed from the chain (revoked once the badge isn't held). Issuer key derived from the service secret locally; a KMS in production. |
+| Profile vault | Attendance service | Optional fields, AES-256-GCM per volunteer (wallet bound as associated data); data keys wrapped by a master key in a **separate** key database; erasure deletes the key, so copies of the main database can't be read. Per-field visibility: private, link (share-link key) or public. |
+| Transcript | Browser | Print view built from the passport (Save as PDF), QR to the live passport. |
+| NGO reports | Indexer `GET /reports/org/:id` (public) | Hours by area and period, corrected/revoked counts; no volunteer data. |
+
 ## 4. Target architecture (Stages 3–6)
 
 ### Decisions recorded in Stage 3

@@ -72,6 +72,18 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
 | Showing renounced badges publicly | Renounced badges are shown to the holder only | design; E2E-GAME public passport has no vault controls |
 | Estimates read as money | Impact Twin always labelled an estimate and "not money earned, paid or owed", with its source | E2E-GAME |
 
+### Trust features (Stage 5)
+| Threat | Mitigation | Evidence |
+|---|---|---|
+| Allegations treated as findings or acted on automatically | Alerts only list; cases need a person; suspension needs the auditor's own transaction; "NGO suspended" outcome checked against the chain | E2E-TRUST |
+| Allegations leaking | Alert and sample views need an auditor wallet sign-in and `AUDITOR_ROLE` | S-IDX |
+| Forged or altered credentials | EdDSA signature over the JWT; issuer DID must match this deployment | S-TRUST tamper test; E2E-TRUST |
+| A credential outliving its badge | Status list and verifier check that the badge is still held | S-TRUST, E2E-TRUST (correction revokes) |
+| Profile data exposure | Encrypted at rest; private fields never served; link fields only with the share key (constant-time compare) | S-TRUST, E2E-TRUST |
+| Data that should be gone surviving in backups | Crypto-shredding with keys in a separate database | S-TRUST erasure test |
+| CSV formula injection in reports | Cells quoted; leading `= + - @` neutralised | code |
+| Key management | **Shortcut:** issuer and vault master keys derived from `ATTENDANCE_SECRET`. Production needs a KMS/HSM (Blocked) | open |
+
 ## 4. Static analysis
 - **Forge lint:** run. Findings triaged:
   - `unsafe-typecast`: `uint64(block.timestamp)` and `uint32(block.timestamp / 1 days)` can't truncate for millions of years.

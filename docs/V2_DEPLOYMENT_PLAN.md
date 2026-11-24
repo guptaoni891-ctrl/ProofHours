@@ -27,6 +27,7 @@ node server/indexer.js                                         # indexer + searc
 python -m http.server 8765 --directory docs    # open http://localhost:8765/?local
 ```
 - **Attendance service:** needs `ethers` (`cd server && npm install`). Settings: `PORT` (8790), `RPC_URL` (`http://127.0.0.1:8546`), `LEDGER` (local ledger address), `CHAIN_ID` (31337), `ATTENDANCE_DB` (`server/data/attendance.sqlite`). The page finds it through `config.js` → `local.attendance`, or `?api=` for another address.
+- **Stage 5 settings (attendance service):** `VAULT_KEYS_DB` (`server/data/vault-keys.sqlite`, keep it apart from the main database and its backups), `PUBLIC_URL` (used in credential status links), `BADGES` (badge contract). The indexer needs the **same** `ATTENDANCE_SECRET` for auditor views.
 - **Indexer:** settings `PORT` (8792), `RPC_URL`, `LEDGER`, `CHAIN_ID`, `CONFIRMATIONS` (2), `START_BLOCK` (found automatically), `POLL_MS` (2000), `INDEXER_DB` (`server/data/indexer.sqlite`). The page finds it through `config.js` → `local.indexer`, or `?search=`. To rebuild from scratch, stop it and delete the database file.
 - **Search benchmark:** `node server/bench-search.js 100000 1000`.
 - **Fixed addresses:** the deployer `0x…50000001` has nonce 0 on Base Sepolia, so on every fresh fork the V2 contracts get the same addresses, which match `docs/config.js` → `local.v2`.
