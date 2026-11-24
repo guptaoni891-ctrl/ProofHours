@@ -1,4 +1,4 @@
-// ProofHours attendance service (V2, Stage 2): shifts, rotating QR check-in/out, supervisor approval.
+// ProofHours attendance service (V2): shifts, rotating QR check-in/out, supervisor approval (Stage 2), opt-in leagues (Stage 4).
 // Off-chain only. It holds no keys and never writes to the chain: hours reach the ledger only when a coordinator
 // signs issueBatch in their own wallet. A QR scan or a location reading alone can never count as completed service.
 // Stores wallet addresses, times and yes/no "at the site" flags; never names, emails or coordinates.
@@ -21,8 +21,16 @@ const LEDGER_ABI = [
   "function optedIn(address) view returns (bool)",
   "function getOrg(uint256) view returns (tuple(string name, address admin, bool suspended, uint32 dailyIssueCap))",
   "function getEvent(uint256) view returns (tuple(uint256 orgId, uint8 category, uint16 maxHours, uint32 serviceDay, address createdBy, string code))",
+  "function totalHours(address) view returns (uint256)",
+  "function originalsOf(address, uint256, uint256) view returns (uint256[] ids, uint256 total)",
+  "function headOf(uint256) view returns (tuple(uint256 id, uint256 eventId, address volunteer, uint16 hoursLogged, uint8 entryType, uint8 category, uint256 orgId, address issuer, uint64 recordedAt, uint32 serviceDay, uint256 replacesId, uint256 supersededBy, bytes32 evidenceHash, bytes32 reason, uint256 v1RecordId))",
   "event HoursIssued(uint256 indexed recordId, uint256 indexed eventId, address indexed volunteer, uint16 hoursLogged, uint8 category, bytes32 evidenceHash)",
 ];
+
+const BANDS = [10, 50, 250, Infinity]; // lifetime verified hours: under 10, under 50, under 250, 250+
+const BAND_NAMES = ["Newcomers (under 10h)", "Regulars (10–49h)", "Veterans (50–249h)", "Legends (250h+)"];
+const ADJ = ["Amber", "Brisk", "Calm", "Bright", "Coral", "Swift", "Teal", "Golden", "Quiet", "Bold", "Sunny", "Misty"];
+const ANIMAL = ["Heron", "Oryx", "Falcon", "Gazelle", "Turtle", "Dolphin", "Lynx", "Ibis", "Fox", "Owl", "Dugong", "Hoopoe"];
 
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const fail = (status, message) => { throw new HttpError(status, message); };
@@ -45,7 +53,8 @@ function openDb(file) {
       in_at INTEGER NOT NULL, in_site INTEGER, out_at INTEGER, out_site INTEGER,
       status TEXT NOT NULL CHECK (status IN ('checked_in','checked_out','approved','rejected','issued')),
       hours INTEGER, decided_by TEXT, decided_at INTEGER, reason TEXT, evidence TEXT, evidence_hash TEXT, record_id TEXT, tx_hash TEXT,
-      UNIQUE (shift_id, volunteer));`);
+      UNIQUE (shift_id, volunteer));
+    CREATE TABLE IF NOT EXISTS league (wallet TEXT PRIMARY KEY, alias TEXT NOT NULL, joined_at INTEGER NOT NULL);`);
   return db;
 }
 
@@ -64,6 +73,13 @@ function ledgerChain(rpcUrl, ledger, chainId) {
       } catch (e) { if (e.code === "CALL_EXCEPTION") return null; throw e; }
     },
     // shortcut: trusts a receipt with 1 confirmation; on a public chain wait for N confirmations (Stage 3 indexer)
+    totalHours: async (a) => Number(await c.totalHours(a)),
+    // latest entry of every record the wallet holds (revoked = 0 hours); service day 0 = imported from V1
+    // shortcut: first 500 records per wallet; page through originalsOf if anyone gets near that
+    records: async (a) => {
+      const [ids] = await c.originalsOf(a, 0, 500);
+      return (await Promise.all(ids.map((id) => c.headOf(id)))).map((h) => ({ hours: Number(h.entryType) === 2 ? 0 : Number(h.hoursLogged), serviceDay: Number(h.serviceDay) }));
+    },
     issued: async (hash) => {
       const r = await provider.getTransactionReceipt(hash);
       if (!r || r.status !== 1) return [];
@@ -210,6 +226,21 @@ function createApp({ db, chain, secret, chainId, now = () => Date.now() }) {
       q("UPDATE attendance SET out_at = ?, out_site = ?, status = 'checked_out' WHERE id = ?").run(now, site(body.atSite), a.id);
       return attendanceView(attendanceById(a.id), hoursOf({ ...a, out_at: now }, s, 24));
     },
+    // ---------- Leagues (opt-in). Members are shown by a generated alias, never by wallet, and only the 3 above and
+    // 3 below you are returned. Seasons are calendar months (UTC); a season's score is verified hours served in it.
+    "POST /league/join": async ({ req }) => {
+      const me = session(req);
+      if (!(await chain.optedIn(me))) fail(403, "Opt in on your passport first: leagues rank verified hours only.");
+      const alias = `${ADJ[crypto.randomInt(ADJ.length)]} ${ANIMAL[crypto.randomInt(ANIMAL.length)]} ${crypto.randomInt(10, 100)}`;
+      q("INSERT OR IGNORE INTO league (wallet, alias, joined_at) VALUES (?, ?, ?)").run(me, alias, t());
+      return league(me);
+    },
+    "POST /league/leave": ({ req }) => {
+      q("DELETE FROM league WHERE wallet = ?").run(session(req)); // removed from every ranking immediately
+      return { joined: false };
+    },
+    "GET /league/me": ({ req }) => league(session(req)),
+
     "GET /me/attendance": ({ req }) =>
       q("SELECT * FROM attendance WHERE volunteer = ? ORDER BY in_at DESC").all(session(req)).map((a) => attendanceView(a)),
 
@@ -270,6 +301,28 @@ function createApp({ db, chain, secret, chainId, now = () => Date.now() }) {
       return { marked };
     },
   };
+
+  // Cohorts of up to 30, formed within experience bands (lifetime verified hours) so newcomers meet newcomers.
+  // shortcut: reads every member's records from the chain on each request; cache or index this past a few hundred members
+  async function league(me) {
+    const mine = q("SELECT * FROM league WHERE wallet = ?").get(me);
+    if (!mine) return { joined: false };
+    const today = Math.floor(t() / 86400), d = new Date(t() * 1000);
+    const start = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 86400000), end = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / 86400000) - 1;
+    const members = await Promise.all(q("SELECT * FROM league ORDER BY joined_at, wallet").all().map(async (m) => {
+      const [life, recs] = await Promise.all([chain.totalHours(m.wallet), chain.records(m.wallet)]);
+      return { ...m, band: BANDS.findIndex((b) => life < b), hours: recs.filter((r) => r.serviceDay >= start && r.serviceDay <= today).reduce((a, r) => a + r.hours, 0) };
+    }));
+    const band = members.find((m) => m.wallet === me).band, inBand = members.filter((m) => m.band === band);
+    const idx = inBand.findIndex((m) => m.wallet === me), cohort = inBand.slice(Math.floor(idx / 30) * 30, Math.floor(idx / 30) * 30 + 30);
+    cohort.sort((a, b) => b.hours - a.hours || a.joined_at - b.joined_at);
+    const rank = cohort.findIndex((m) => m.wallet === me);
+    return {
+      joined: true, alias: mine.alias, season: { start, end }, band: BAND_NAMES[band], cohortSize: cohort.length, rank: rank + 1,
+      hours: cohort[rank].hours,
+      strip: cohort.slice(Math.max(0, rank - 3), rank + 4).map((m) => ({ alias: m.alias, hours: m.hours, rank: cohort.indexOf(m) + 1, you: m.wallet === me })),
+    };
+  }
 
   const table = Object.entries(routes).map(([k, fn]) => {
     const [method, pattern] = k.split(" ");

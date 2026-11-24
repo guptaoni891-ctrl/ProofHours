@@ -24,6 +24,9 @@ async function setup() {
     orgSuspended: async (id) => !!chain.suspended[id],
     event: async (id) => chain.events[id] ?? null,
     issued: async (h) => chain.logs[h] ?? [],
+    recs: {},
+    totalHours: async (a) => (chain.recs[a] ?? []).reduce((x, r) => x + r.hours, 0),
+    records: async (a) => chain.recs[a] ?? [],
   };
   const server = http.createServer(createApp({ db: openDb(":memory:"), chain, secret: "test-secret", chainId: 31337, now: () => clock }));
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -42,7 +45,7 @@ async function setup() {
   await refresh();
   const shift = async (over = {}) => (await call("POST", "/shifts", tok.coord, { eventId: 1, start: sec(T0) - 600, end: sec(T0) + 4 * 3600, capacity: 10, ...over })).body;
   const qr = async (id, kind = "in") => (await call("GET", `/shifts/${id}/qr?kind=${kind}`, tok.coord)).body.token;
-  return { coord, vol, vol2, outsider, chain, call, signIn, tok, shift, qr, advance: async (s, keepSessions) => { clock += s * 1000; if (!keepSessions) await refresh(); }, /* sessions last 2 h */ close: () => server.close() };
+  return { coord, coord2, vol, vol2, outsider, chain, wallets: { coord, coord2, vol, vol2, outsider }, call, signIn, tok, shift, qr, advance: async (s, keepSessions) => { clock += s * 1000; if (!keepSessions) await refresh(); }, /* sessions last 2 h */ close: () => server.close() };
 }
 
 test("sign-in: one-time nonce, wallet must match, tokens can't be forged or outlive their expiry", async (t) => {
@@ -188,4 +191,35 @@ test("issued: marked only when the chain shows the matching event, wallet and ev
   assert.equal((await s.call("POST", `/shifts/${sh.id}/issued`, s.tok.coord, { txHash: good })).body.marked, 1);
   const [mine] = (await s.call("GET", "/me/attendance", s.tok.vol)).body;
   assert.deepEqual([mine.status, mine.recordId, mine.txHash, mine.hours], ["issued", "8", good, 3]);
+});
+
+test("leagues: opt-in only, aliases not wallets, near-me strip only, season scores from verified hours, leaving removes you", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  assert.deepEqual((await s.call("GET", "/league/me", s.tok.vol)).body, { joined: false });
+  assert.match((await s.call("POST", "/league/join", s.tok.outsider)).body.error, /Opt in on your passport first/);
+  // ten opted-in members with verified hours this season (T0 is 24 Nov 2026), plus older and V1-imported hours that don't count
+  const extra = await Promise.all(Array.from({ length: 8 }, async () => { const w = ethers.Wallet.createRandom(); s.chain.opted.add(w.address); return w; }));
+  extra.forEach((w, i) => (s.chain.recs[w.address] = [{ hours: i + 1, serviceDay: DAY }]));
+  s.chain.recs[s.vol.address] = [{ hours: 5, serviceDay: DAY }, { hours: 4, serviceDay: DAY - 40 }, { hours: 9, serviceDay: 0 }];
+  s.chain.recs[s.vol2.address] = [{ hours: 1, serviceDay: DAY - 3 }];
+  const me = (await s.call("POST", "/league/join", s.tok.vol)).body;
+  assert.equal(me.hours, 5, "only this season's verified service counts (not last month's 4h, not the V1 import)");
+  await s.call("POST", "/league/join", s.tok.vol2);
+  for (const w of extra) await s.call("POST", "/league/join", await s.signIn(w));
+  const vol2 = (await s.call("GET", "/league/me", s.tok.vol2)).body;
+  assert.equal(vol2.band, "Newcomers (under 10h)");
+  const v = (await s.call("GET", "/league/me", s.tok.vol)).body;
+  assert.equal(v.band, "Regulars (10–49h)", "vol has 18h lifetime, so a different band from the newcomers");
+  assert.equal(v.cohortSize, 1);
+  assert.equal(vol2.cohortSize, 9);
+  assert.ok(vol2.strip.length <= 7 && vol2.strip.some((x) => x.you), "only 3 above, you, 3 below");
+  assert.deepEqual(vol2.strip.map((x) => x.rank), [...vol2.strip.map((x) => x.rank)].sort((a, b) => a - b));
+  const all = JSON.stringify([vol2, v]);
+  for (const w of [s.vol, s.vol2, ...extra]) assert.ok(!all.includes(w.address) && !all.toLowerCase().includes(w.address.slice(2, 10).toLowerCase()), "no wallets in league responses");
+  assert.match(vol2.alias, /^[A-Z][a-z]+ [A-Z][a-z]+ \d{2}$/);
+  await s.call("POST", "/league/leave", s.tok.vol2);
+  assert.deepEqual((await s.call("GET", "/league/me", s.tok.vol2)).body, { joined: false });
+  const other = (await s.call("GET", "/league/me", await s.signIn(extra[0]))).body;
+  assert.equal(other.cohortSize, 8, "a member who left is ranked nowhere");
 });
