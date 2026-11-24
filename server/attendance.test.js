@@ -223,3 +223,47 @@ test("leagues: opt-in only, aliases not wallets, near-me strip only, season scor
   const other = (await s.call("GET", "/league/me", await s.signIn(extra[0]))).body;
   assert.equal(other.cohortSize, 8, "a member who left is ranked nowhere");
 });
+
+test("operations: rate limit returns 429 with Retry-After, metrics count requests and latency", async (t) => {
+  let clock = T0;
+  const server = http.createServer(createApp({ db: openDb(":memory:"), chain: {}, secret: "s", chainId: 31337, now: () => clock, rateLimit: 3 }));
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  t.after(() => server.close());
+  const get = (p) => fetch(`http://127.0.0.1:${server.address().port}${p}`);
+  assert.deepEqual(await Promise.all([1, 2, 3].map(async () => (await get("/health")).status)), [200, 200, 200]);
+  const limited = await get("/health");
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get("retry-after"), "60");
+  assert.match((await limited.json()).error, /Too many requests/);
+  clock += 60_000; // a new window
+  const m = await (await get("/metrics")).json();
+  assert.deepEqual([m.service, m.requests, m.byStatus["200"], m.byStatus["429"], m.rateLimited, m.limitPerMinute], ["attendance", 4, 3, 1, 1, 3]);
+  assert.ok(m.latencyMs.p95 >= 0);
+});
+
+test("offline vouchers: coordinator-only, tamper-evident, single use, redemption window, overlap, still need approval", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  const sh = await s.shift({ start: sec(T0) - 4 * 3600, end: sec(T0) - 3600 }); // a 3h shift that has ended
+  assert.equal((await s.call("POST", `/shifts/${sh.id}/vouchers`, s.tok.vol, { count: 2 })).status, 403);
+  assert.equal((await s.call("POST", `/shifts/${sh.id}/vouchers`, s.tok.coord2, { count: 2 })).status, 403, "other NGO");
+  const { codes } = (await s.call("POST", `/shifts/${sh.id}/vouchers`, s.tok.coord, { count: 3 })).body;
+  assert.equal(codes.length, 3);
+  assert.match(codes[0], /^PH-\d+-[0-9A-F]{8}-[0-9A-F]{10}$/);
+  const forged = codes[0].slice(0, -1) + (codes[0].endsWith("A") ? "B" : "A");
+  assert.match((await s.call("POST", "/vouchers/redeem", s.tok.vol, { code: forged })).body.error, /not valid/);
+  assert.equal((await s.call("POST", "/vouchers/redeem", s.tok.outsider, { code: codes[0] })).status, 403, "consent first");
+  const a = (await s.call("POST", "/vouchers/redeem", s.tok.vol, { code: ` ${codes[0].toLowerCase()} ` })).body; // typed by hand: case and spaces don't matter
+  assert.deepEqual([a.status, a.source, a.hours, a.checkIn, a.checkOut], ["checked_out", "voucher", 3, sh.start, sh.end]);
+  assert.match((await s.call("POST", "/vouchers/redeem", s.tok.vol2, { code: codes[0] })).body.error, /already been used/, "single use");
+  assert.match((await s.call("POST", "/vouchers/redeem", s.tok.vol, { code: codes[1] })).body.error, /already have attendance for this shift/);
+  // overlapping shift of another event
+  const other = await s.shift({ eventId: 2, start: sec(T0) - 2 * 3600, end: sec(T0) - 1800 });
+  const oc = (await s.call("POST", `/shifts/${other.id}/vouchers`, s.tok.coord, { count: 1 })).body.codes[0];
+  assert.match((await s.call("POST", "/vouchers/redeem", s.tok.vol, { code: oc })).body.error, /overlaps attendance/);
+  assert.deepEqual((await s.call("GET", `/shifts/${sh.id}/issuable`, s.tok.coord)).body.volunteers, [], "not issuable before approval");
+  const ok = (await s.call("POST", `/attendance/${a.id}/approve`, s.tok.coord)).body;
+  assert.equal(JSON.parse(ok.evidence).source, "voucher", "the evidence says how attendance was recorded");
+  await s.advance(8 * 86400);
+  assert.match((await s.call("POST", "/vouchers/redeem", s.tok.vol2, { code: codes[2] })).body.error, /expired/);
+});

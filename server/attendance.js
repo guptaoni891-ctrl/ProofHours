@@ -8,13 +8,16 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
+const { performance } = require("node:perf_hooks");
 const { ethers } = require("ethers");
 const { mac, safeEq, issue, verify } = require("./session");
 const { trustRoutes } = require("./trust");
+const { createOps } = require("./ops");
 
 const QR_WINDOW = 30; // seconds per rotating QR code; a code is accepted in its own window and the next one
 const SESSION_TTL = 2 * 3600;
 const NONCE_TTL = 300;
+const VOUCHER_DAYS = 7; // offline vouchers can be redeemed for a week after the shift
 const EARLY_CHECKIN = 30 * 60; // check-in opens 30 minutes before the shift
 const LATE_CHECKOUT = 2 * 3600; // check-out stays open 2 hours after the shift ends
 
@@ -30,6 +33,8 @@ const LEDGER_ABI = [
   "event HoursIssued(uint256 indexed recordId, uint256 indexed eventId, address indexed volunteer, uint16 hoursLogged, uint8 category, bytes32 evidenceHash)",
 ];
 
+// one query for a list of shifts with their attendance counts (instead of one count query per shift)
+const SHIFTS_WITH_COUNTS = "SELECT s.*, COUNT(a.id) AS attending FROM shifts s LEFT JOIN attendance a ON a.shift_id = s.id AND a.status != 'rejected'";
 const BANDS = [10, 50, 250, Infinity]; // lifetime verified hours: under 10, under 50, under 250, 250+
 const BAND_NAMES = ["Newcomers (under 10h)", "Regulars (10–49h)", "Veterans (50–249h)", "Legends (250h+)"];
 const ADJ = ["Amber", "Brisk", "Calm", "Bright", "Coral", "Swift", "Teal", "Golden", "Quiet", "Bold", "Sunny", "Misty"];
@@ -55,7 +60,9 @@ function openDb(file) {
       status TEXT NOT NULL CHECK (status IN ('checked_in','checked_out','approved','rejected','issued')),
       hours INTEGER, decided_by TEXT, decided_at INTEGER, reason TEXT, evidence TEXT, evidence_hash TEXT, record_id TEXT, tx_hash TEXT,
       UNIQUE (shift_id, volunteer));
-    CREATE TABLE IF NOT EXISTS league (wallet TEXT PRIMARY KEY, alias TEXT NOT NULL, joined_at INTEGER NOT NULL);`);
+    CREATE TABLE IF NOT EXISTS league (wallet TEXT PRIMARY KEY, alias TEXT NOT NULL, joined_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS vouchers (code TEXT PRIMARY KEY, shift_id INTEGER NOT NULL REFERENCES shifts(id), created_at INTEGER NOT NULL, redeemed_by TEXT, redeemed_at INTEGER);`);
+  try { db.exec("ALTER TABLE attendance ADD COLUMN source TEXT NOT NULL DEFAULT 'qr'"); } catch { /* already there */ }
   return db;
 }
 
@@ -101,7 +108,8 @@ function ledgerChain(rpcUrl, ledger, chainId, badgesAddress) {
   };
 }
 
-function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, chainId, publicUrl = "http://127.0.0.1:8790", now = () => Date.now() }) {
+function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, chainId, publicUrl = "http://127.0.0.1:8790", now = () => Date.now(), rateLimit = Infinity, log = false }) {
+  const ops = createOps({ service: "attendance", limit: rateLimit, log, now });
   const t = () => Math.floor(now() / 1000);
   const q = (sql) => db.prepare(sql);
 
@@ -133,16 +141,17 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
   const shiftView = (s) => ({
     id: s.id, eventId: s.event_id, orgId: s.org_id, start: s.start_at, end: s.end_at, capacity: s.capacity,
     site: s.lat === null ? null : { lat: s.lat, lng: s.lng, radius: s.radius },
-    attending: q("SELECT COUNT(*) AS n FROM attendance WHERE shift_id = ? AND status != 'rejected'").get(s.id).n,
+    attending: s.attending ?? q("SELECT COUNT(*) AS n FROM attendance WHERE shift_id = ? AND status != 'rejected'").get(s.id).n,
   });
   // Hours inside the shift window, whole hours rounded down, capped by the event's maximum.
   const hoursOf = (a, s, maxHours) => Math.min(maxHours, Math.floor(Math.max(0, Math.min(a.out_at, s.end_at) - Math.max(a.in_at, s.start_at)) / 3600));
   const attendanceView = (a, preview) => ({
     id: a.id, shiftId: a.shift_id, eventId: a.event_id, volunteer: a.volunteer, checkIn: a.in_at, checkOut: a.out_at,
-    atSiteIn: flag(a.in_site), atSiteOut: flag(a.out_site), status: a.status, hours: a.hours ?? preview ?? null,
+    atSiteIn: flag(a.in_site), atSiteOut: flag(a.out_site), status: a.status, hours: a.hours ?? preview ?? null, source: a.source ?? "qr",
     decidedBy: a.decided_by, reason: a.reason, evidence: a.evidence, evidenceHash: a.evidence_hash, recordId: a.record_id, txHash: a.tx_hash,
   });
 
+  const voucherMac = (shiftId, serial) => crypto.createHmac("sha256", secret).update(`voucher.${shiftId}.${serial}`).digest("hex").slice(0, 10).toUpperCase();
   function readQr(token, kind) {
     const [sid, k, win, sig] = String(token ?? "").split(".");
     if (!sig || !safeEq(sig, mac(secret, `qr.${sid}.${k}.${win}`))) fail(400, "This QR code is not valid.");
@@ -153,7 +162,8 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
   }
 
   const routes = {
-    "GET /health": () => ({ ok: true }),
+    "GET /health": () => ({ ok: !!q("SELECT 1 AS x").get().x }),
+    "GET /metrics": () => ops.metrics(),
 
     // Sign-in: the server issues a one-time nonce and the exact message; the wallet signs it (personal_sign).
     "POST /auth/nonce": ({ body }) => {
@@ -193,11 +203,11 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
     },
     "GET /shifts": async ({ req }) => {
       const org = await coordinatorFor(session(req));
-      return q("SELECT * FROM shifts WHERE org_id = ? ORDER BY start_at DESC, id DESC").all(org).map(shiftView);
+      return q(`${SHIFTS_WITH_COUNTS} WHERE s.org_id = ? GROUP BY s.id ORDER BY s.start_at DESC, s.id DESC`).all(org).map(shiftView);
     },
     "GET /shifts/:id": ({ id }) => shiftView(shiftById(id)), // public: event, times, capacity, site area; no attendee data
     // Public directory of shifts that haven't ended: times, capacity, spots taken. No attendee identities.
-    "GET /opportunities": () => q("SELECT * FROM shifts WHERE end_at > ? ORDER BY start_at, id LIMIT 200").all(t()).map(shiftView),
+    "GET /opportunities": () => q(`${SHIFTS_WITH_COUNTS} WHERE s.end_at > ? GROUP BY s.id ORDER BY s.start_at, s.id LIMIT 200`).all(t()).map(shiftView),
 
     "GET /shifts/:id/qr": async ({ req, id, url }) => {
       const s = shiftById(id);
@@ -248,6 +258,42 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
     },
     "GET /league/me": ({ req }) => league(session(req)),
 
+    // ---------- Offline vouchers (Stage 6): for sites without connectivity. The coordinator prints single-use codes
+    // and hands one to each volunteer at the end of the shift; redeeming one later records attendance for the whole
+    // shift, which the coordinator still has to approve. A code is tamper-evident (HMAC) and works once.
+    "POST /shifts/:id/vouchers": async ({ req, id, body }) => {
+      const s = shiftById(id);
+      await coordinatorFor(session(req), s.org_id);
+      const count = int(body.count ?? 20, "Count", 1, 200), ins = q("INSERT INTO vouchers (code, shift_id, created_at) VALUES (?, ?, ?)");
+      const codes = Array.from({ length: count }, () => {
+        const serial = crypto.randomBytes(4).toString("hex").toUpperCase(), code = `PH-${s.id}-${serial}-${voucherMac(s.id, serial)}`;
+        ins.run(code, s.id, t());
+        return code;
+      });
+      return { shiftId: s.id, codes, redeemUntil: s.end_at + VOUCHER_DAYS * 86400 };
+    },
+    "POST /vouchers/redeem": async ({ req, body }) => {
+      const me = session(req), canonical = String(body.code ?? "").trim().toUpperCase(); // hex only, so typing case doesn't matter
+      const m = /^PH-(\d+)-([0-9A-F]{8})-([0-9A-F]{10})$/.exec(canonical);
+      if (!m || !safeEq(m[3], voucherMac(m[1], m[2]))) fail(400, "This voucher code is not valid. Check it for typos.");
+      if (!(await chain.optedIn(me))) fail(403, "Opt in on your passport first, so NGOs can issue hours to this wallet.");
+      const v = q("SELECT * FROM vouchers WHERE code = ?").get(canonical) ?? fail(404, "This voucher was not issued.");
+      if (v.redeemed_by) fail(409, "This voucher has already been used.");
+      const s = shiftById(v.shift_id), now = t();
+      if (now < s.end_at - EARLY_CHECKIN) fail(400, "Vouchers can be redeemed from the end of the shift.");
+      if (now > s.end_at + VOUCHER_DAYS * 86400) fail(400, `This voucher expired ${VOUCHER_DAYS} days after the shift.`);
+      if (q("SELECT 1 FROM attendance WHERE shift_id = ? AND volunteer = ?").get(s.id, me)) fail(409, "You already have attendance for this shift.");
+      const same = q("SELECT shift_id FROM attendance WHERE volunteer = ? AND event_id = ? AND status != 'rejected'").get(me, s.event_id);
+      if (same) fail(409, `You already have attendance for this event (shift #${same.shift_id}). The ledger holds one record per volunteer per event.`);
+      const overlap = q("SELECT shift_id FROM attendance WHERE volunteer = ? AND status != 'rejected' AND in_at < ? AND COALESCE(out_at, in_at) > ?").get(me, s.end_at, s.start_at);
+      if (overlap) fail(409, `This shift overlaps attendance you already have (shift #${overlap.shift_id}).`);
+      if (q("SELECT COUNT(*) AS n FROM attendance WHERE shift_id = ? AND status != 'rejected'").get(s.id).n >= s.capacity) fail(409, "This shift is full.");
+      if (q("UPDATE vouchers SET redeemed_by = ?, redeemed_at = ? WHERE code = ? AND redeemed_by IS NULL").run(me, now, canonical).changes !== 1) fail(409, "This voucher has already been used.");
+      const { lastInsertRowid } = q("INSERT INTO attendance (shift_id, event_id, volunteer, in_at, out_at, status, source) VALUES (?, ?, ?, ?, ?, 'checked_out', 'voucher')")
+        .run(s.id, s.event_id, me, s.start_at, s.end_at);
+      return attendanceView(attendanceById(Number(lastInsertRowid)), hoursOf({ in_at: s.start_at, out_at: s.end_at }, s, 24));
+    },
+
     "GET /me/attendance": ({ req }) =>
       q("SELECT * FROM attendance WHERE volunteer = ? ORDER BY in_at DESC").all(session(req)).map((a) => attendanceView(a)),
 
@@ -267,7 +313,7 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
       // The salt stops anyone guessing the times from the public evidence hash.
       const evidence = JSON.stringify({
         v: 1, kind: "proofhours-attendance", shiftId: s.id, eventId: s.event_id, volunteer: a.volunteer, shiftStart: s.start_at, shiftEnd: s.end_at,
-        checkIn: a.in_at, checkOut: a.out_at, atSiteIn: flag(a.in_site), atSiteOut: flag(a.out_site), hours, approvedBy: me, approvedAt: t(),
+        checkIn: a.in_at, checkOut: a.out_at, atSiteIn: flag(a.in_site), atSiteOut: flag(a.out_site), source: a.source ?? "qr", hours, approvedBy: me, approvedAt: t(),
         salt: crypto.randomBytes(16).toString("hex"),
       });
       q("UPDATE attendance SET status = 'approved', hours = ?, decided_by = ?, decided_at = ?, evidence = ?, evidence_hash = ? WHERE id = ?")
@@ -348,11 +394,15 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
 
   return async function handle(req, res) {
     // Bearer tokens, no cookies: any origin may call, nothing ambient is sent.
-    const reply = (status, obj) => {
-      res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "content-type, authorization", "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "cache-control": "no-store" });
+    const t0 = performance.now();
+    const reply = (status, obj, extra = {}) => {
+      res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "content-type, authorization", "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "cache-control": "no-store", "x-content-type-options": "nosniff", ...extra });
       res.end(obj === undefined ? "" : JSON.stringify(obj));
+      ops.record(req, status, performance.now() - t0);
     };
     if (req.method === "OPTIONS") return reply(204);
+    const wait = ops.throttle(req);
+    if (wait) return reply(429, { error: `Too many requests. Try again in ${wait} seconds.` }, { "retry-after": String(wait) });
     try {
       const url = new URL(req.url, "http://localhost");
       let m;
@@ -384,7 +434,7 @@ if (require.main === module) {
   const keysDb = new DatabaseSync(env.VAULT_KEYS_DB || path.join(__dirname, "data", "vault-keys.sqlite"));
   const port = Number(env.PORT || 8790);
   const badges = env.BADGES || "0x64d4972B737C1ECfab6FEdE9AD201D28660a35F4"; // local deterministic V2 badges (docs/config.js)
-  http.createServer(createApp({ db, keysDb, chain: ledgerChain(rpc, ledger, chainId, badges), secret, chainId, publicUrl: env.PUBLIC_URL || `http://127.0.0.1:${port}` }))
+  http.createServer(createApp({ db, keysDb, chain: ledgerChain(rpc, ledger, chainId, badges), secret, chainId, publicUrl: env.PUBLIC_URL || `http://127.0.0.1:${port}`, rateLimit: Number(env.RATE_LIMIT || 300), log: env.LOG_REQUESTS !== "0" }))
     .listen(port, "127.0.0.1", () => console.log(`Attendance service on http://127.0.0.1:${port} (ledger ${ledger} via ${rpc})`));
 }
 

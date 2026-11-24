@@ -13,6 +13,7 @@ const { performance } = require("node:perf_hooks");
 const { DatabaseSync } = require("node:sqlite");
 const { ethers } = require("ethers");
 const session = require("./session");
+const { createOps } = require("./ops");
 
 const CATS = ["Environmental", "Education", "Healthcare", "Emergency response", "Inclusion"];
 const ABI = [
@@ -202,7 +203,8 @@ function sample(db, seed, rate) {
 // Search terms become prefix queries ("mangr" finds "Mangrove"); punctuation is ignored, so FTS syntax can't be injected.
 const ftsQuery = (q) => (String(q).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).slice(0, 8).map((w) => `"${w}"*`).join(" ");
 
-function createApi({ db, indexer, provider, confirmations, ledger, secret, now = () => Date.now() }) {
+function createApi({ db, indexer, provider, confirmations, ledger, secret, now = () => Date.now(), rateLimit = Infinity, log = false }) {
+  const ops = createOps({ service: "indexer", limit: rateLimit, log, now });
   const roles = ledger && new ethers.Contract(ledger, LEDGER_VIEWS, provider);
   async function auditor(req) {
     if (!secret || !roles) return { status: 503, error: "Auditor views need ATTENDANCE_SECRET (shared with the attendance service) and the ledger address." };
@@ -229,15 +231,20 @@ function createApi({ db, indexer, provider, confirmations, ledger, secret, now =
   }
 
   return async function handle(req, res) {
-    const reply = (status, obj) => {
-      res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "authorization", "cache-control": "no-store" });
+    const t0 = performance.now();
+    const reply = (status, obj, extra = {}) => {
+      res.writeHead(status, { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "authorization", "cache-control": "no-store", "x-content-type-options": "nosniff", ...extra });
       res.end(JSON.stringify(obj));
+      ops.record(req, status, performance.now() - t0);
     };
+    const wait = ops.throttle(req);
+    if (wait) return reply(429, { error: `Too many requests. Try again in ${wait} seconds.` }, { "retry-after": String(wait) });
     try {
       const url = new URL(req.url, "http://localhost");
       if (req.method === "OPTIONS") return reply(204, {});
       if (req.method !== "GET") return reply(405, { error: "Read-only API." });
       if (url.pathname === "/search") return reply(200, search(url));
+      if (url.pathname === "/metrics") return reply(200, ops.metrics());
       if (url.pathname === "/reports/orgs") return reply(200, db.prepare("SELECT id, name, suspended FROM orgs ORDER BY id").all().map((o) => ({ ...o })));
       const rep = /^\/reports\/org\/(\d+)$/.exec(url.pathname);
       if (rep) {
@@ -275,7 +282,7 @@ if (require.main === module) {
     const startBlock = env.START_BLOCK ? Number(env.START_BLOCK) : await findDeployBlock(provider, ledger);
     const indexer = createIndexer({ db, provider, ledger, startBlock, confirmations });
     const port = Number(env.PORT || 8792);
-    http.createServer(createApi({ db, indexer, provider, confirmations, ledger, secret: env.ATTENDANCE_SECRET })).listen(port, "127.0.0.1", () => console.log(`Indexer + search on http://127.0.0.1:${port} (ledger ${ledger} from block ${startBlock}, ${confirmations} confirmations)`));
+    http.createServer(createApi({ db, indexer, provider, confirmations, ledger, secret: env.ATTENDANCE_SECRET, rateLimit: Number(env.RATE_LIMIT || 600), log: env.LOG_REQUESTS !== "0" })).listen(port, "127.0.0.1", () => console.log(`Indexer + search on http://127.0.0.1:${port} (ledger ${ledger} from block ${startBlock}, ${confirmations} confirmations)`));
     for (;;) {
       try { await indexer.syncAll(); } catch (e) { console.error("sync failed, retrying:", e.shortMessage || e.message); }
       await new Promise((r) => setTimeout(r, Number(env.POLL_MS || 2000)));
