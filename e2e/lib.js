@@ -104,6 +104,23 @@ function signingWallet(keys, rpcUrl, otherRpcUrl) {
   };
 }
 
+// LOCAL CHAINS ONLY: acts as `address` and sends via anvil's account impersonation (no key exists here).
+// Used where a test needs a specific real wallet (e.g. the V1 issuer) to sign on an isolated fork.
+function impersonatingWallet(address, rpcUrl) {
+  window.__sends = 0;
+  const rpc = (m, p) => fetch(rpcUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: m, params: p }) }).then((r) => r.json());
+  window.ethereum = {
+    on: () => {},
+    request: async ({ method, params }) => {
+      if (method === "eth_requestAccounts" || method === "eth_accounts") return [address];
+      if (method === "eth_sendTransaction") { window.__sends++; params = [{ ...params[0], from: address }]; }
+      const r = await rpc(method, params);
+      if (r.error) throw Object.assign(new Error(r.error.message), { code: r.error.code, data: r.error.data });
+      return r.result;
+    },
+  };
+}
+
 // ---- page helpers ----
 async function openPage(browser, url, { width = 1366, height = 900, wallet, args = [] } = {}) {
   const page = await browser.newPage();
@@ -152,4 +169,4 @@ function summary() {
   return fail;
 }
 
-module.exports = { LIVE, ADMIN, sleep, loadConfig, loadDemo, group, check, results, summary, serveDocs, launch, readOnlyWallet, signingWallet, openPage, txt, visible, nav, overflow, waitText, submit, confirmCard, shot };
+module.exports = { LIVE, ADMIN, sleep, loadConfig, loadDemo, group, check, results, summary, serveDocs, launch, readOnlyWallet, signingWallet, impersonatingWallet, openPage, txt, visible, nav, overflow, waitText, submit, confirmCard, shot };

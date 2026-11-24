@@ -7,7 +7,7 @@
   <meta name="description" content="ProofHours records community-service hours from accredited NGOs on a public ledger, so anyone can verify them in seconds.">
   <title>ProofHours · Verifiable volunteer records</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23F4F4F5'/%3E%3Cpath d='M10 16.5l4 4 8-9' stroke='%2308090B' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=13">
+  <link rel="stylesheet" href="style.css?v=16">
 </head>
 <body data-view="landing">
 <a class="skip" href="#main">Skip to content</a>
@@ -26,11 +26,15 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.5 3 8.4 7 10 4-1.6 7-5.5 7-10V6l-7-3Z"/><path d="m9 12 2.2 2.2L15.5 10"/></svg>Verify a record</button>
     <button class="nav-item" data-page="impact">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>My impact</button>
+    <button class="nav-item" data-page="passport">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="5"/><path d="m8.5 13.5-1.5 7 5-2.5 5 2.5-1.5-7"/></svg>My passport<span class="tag">V2</span></button>
     <span class="nav-label">Workspaces</span>
     <button class="nav-item" data-page="coord">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M8 2v4M16 2v4M8 11h8M8 15h5"/></svg>Coordinator</button>
     <button class="nav-item" data-page="admin">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 11.5 18 13.5l3.5-4"/></svg>Admin</button>
+    <button class="nav-item" data-page="issue2">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 21h16"/></svg>V2 issuance<span class="tag">V2</span></button>
     <span class="nav-label">System</span>
     <button class="nav-item" data-page="demo">
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>Contract rules</button>
@@ -212,6 +216,111 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>
           <h3>Your impact appears here</h3>
           <p>Pick a demo volunteer or enter the ID and salt from your receipt to see your verified hours, your next milestone and the proof behind every hour.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= V2: PASSPORT ================= -->
+    <section id="passport" class="page" data-title="My passport" hidden>
+      <header class="page-head"><h2>My passport</h2><p>Your wallet-linked record: verified hours by impact area, the soulbound badges they have earned on-chain, and every entry behind them. Hours only come from accredited NGOs; nothing here can be self-reported.</p></header>
+      <div id="ppNotice" class="banner warn" hidden></div>
+      <div id="ppBody" class="v2-body" hidden>
+        <form id="ppOptForm" class="banner consent" novalidate>
+          <div id="ppConsent" class="consent-text"></div>
+          <button type="submit" class="btn btn-primary sm">Opt in</button>
+          <div class="msg" role="alert"></div>
+        </form>
+        <div id="ppSummary" class="pp-summary"></div>
+        <section class="panel">
+          <div class="panel-head"><h3>Trophy Vault</h3><span class="hint">soulbound badges held by this wallet on this chain</span></div>
+          <div id="ppVault" class="vault"><p class="muted small">Connect a wallet to see its badges.</p></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h3>Records</h3><span class="hint">latest entry of each record</span></div>
+          <ul id="ppRecords" class="impact-list"><li class="muted small">No records yet.</li></ul>
+        </section>
+        <form id="v1LinkForm" class="panel form-panel">
+          <div class="panel-head"><h3>Bring a V1 record into your passport</h3></div>
+          <p class="small muted">Enter the record number from your V1 receipt. This only records your consent: the NGO that issued it must confirm, and the hours are read from the V1 contract, never typed in.</p>
+          <div class="inline-fields">
+            <label class="field"><span>V1 record #</span><input id="v1LinkId" type="number" min="1" required></label>
+            <button type="submit" class="btn btn-ghost">Request link</button>
+          </div>
+          <div class="msg" role="alert"></div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ================= V2: ISSUANCE ================= -->
+    <section id="issue2" class="page" data-title="V2 issuance" hidden>
+      <header class="page-head"><h2>V2 issuance</h2><p>Issue categorised hours straight to volunteers' wallets. Totals, milestones and soulbound badges update in the same transaction. Every write is checked by the contract before your wallet is asked to sign.</p></header>
+      <div id="isNotice" class="banner warn" hidden></div>
+      <div id="isBody" class="v2-body" hidden>
+        <div id="isContext" class="banner"></div>
+        <div class="grid-2">
+          <div class="stack">
+            <form id="v2EventForm" class="panel form-panel">
+              <div class="panel-head"><h3><span class="step">01</span>Create an event</h3></div>
+              <label class="field"><span>Event code</span><input id="v2Code" required placeholder="EVT-101 Mangrove Planting (demo)"></label>
+              <div class="field-row">
+                <label class="field"><span>Impact area</span><select id="v2Cat"><option value="0">Environmental</option><option value="1">Education</option><option value="2">Healthcare</option><option value="3">Emergency response</option><option value="4">Inclusion</option></select></label>
+                <label class="field"><span>Maximum hours</span><input id="v2Max" type="number" min="1" max="24" value="6" required></label>
+              </div>
+              <label class="field"><span>Service date</span><input id="v2Day" type="date" required></label>
+              <button type="submit" class="btn btn-primary">Create event</button>
+              <div class="msg" role="alert"></div>
+            </form>
+            <div class="panel">
+              <div class="panel-head"><h3>Your NGO's V2 events</h3></div>
+              <div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Event</th><th>Area</th><th>Date</th><th>Max</th></tr></thead><tbody id="v2Events"><tr><td colspan="5" class="muted">No events yet.</td></tr></tbody></table></div>
+            </div>
+          </div>
+          <form id="v2IssueForm" class="panel form-panel">
+            <div class="panel-head"><h3><span class="step">02</span>Issue hours</h3></div>
+            <label class="field"><span>Event</span><select id="v2IssueEvent" required><option value="">Create an event first</option></select></label>
+            <label class="field"><span>Roster <em>one per line: wallet address, hours</em></span><textarea id="v2Roster" rows="5" class="mono" spellcheck="false" placeholder="0x1234…abcd, 4"></textarea>
+              <small>Volunteers must have opted in. Several lines go out as one batch: if any line is invalid, nothing is issued.</small></label>
+            <button type="submit" class="btn btn-primary">Issue hours</button>
+            <div class="msg" role="alert"></div>
+          </form>
+        </div>
+        <div class="grid-2">
+          <form id="v2CorrectForm" class="panel form-panel">
+            <div class="panel-head"><h3><span class="step">03</span>Correct a record</h3><span class="hint">adds a new entry</span></div>
+            <div class="field-row">
+              <label class="field"><span>Record #</span><input id="v2FixId" type="number" min="1" required></label>
+              <label class="field"><span>Correct hours</span><input id="v2FixHours" type="number" min="1" required></label>
+            </div>
+            <label class="field"><span>Reason code</span><input id="v2FixReason" value="TYPO_FIX" maxlength="31" required></label>
+            <button type="submit" class="btn btn-primary">Append correction</button>
+            <div class="msg" role="alert"></div>
+          </form>
+          <form id="v2RevokeForm" class="panel form-panel">
+            <div class="panel-head"><h3><span class="step">04</span>Revoke a record</h3><span class="hint">adds a new entry</span></div>
+            <label class="field"><span>Record #</span><input id="v2RevId" type="number" min="1" required></label>
+            <label class="field"><span>Reason code</span><input id="v2RevReason" value="ATTENDANCE_VOID" maxlength="31" required></label>
+            <button type="submit" class="btn btn-danger">Append revocation</button>
+            <div class="msg" role="alert"></div>
+          </form>
+        </div>
+        <div class="grid-2">
+          <form id="v1ApproveForm" class="panel form-panel">
+            <div class="panel-head"><h3><span class="step">05</span>Approve a V1 link</h3></div>
+            <p class="small muted">Only the wallet that issued the V1 record can approve, after checking the student's receipt off-chain. Hours are copied from V1 at their current value.</p>
+            <div class="field-row">
+              <label class="field"><span>V1 record #</span><input id="v1ApproveId" type="number" min="1" required></label>
+              <label class="field"><span>Impact area</span><select id="v1ApproveCat"><option value="0">Environmental</option><option value="1">Education</option><option value="2">Healthcare</option><option value="3">Emergency response</option><option value="4">Inclusion</option></select></label>
+            </div>
+            <button type="submit" class="btn btn-primary">Approve link</button>
+            <div class="msg" role="alert"></div>
+          </form>
+          <form id="v1SyncForm" class="panel form-panel">
+            <div class="panel-head"><h3><span class="step">06</span>Sync a linked V1 record</h3></div>
+            <p class="small muted">If a linked V1 record was corrected or revoked in V1 afterwards, anyone can mirror that change here.</p>
+            <label class="field"><span>V1 record #</span><input id="v1SyncId" type="number" min="1" required></label>
+            <button type="submit" class="btn btn-ghost">Sync from V1</button>
+            <div class="msg" role="alert"></div>
+          </form>
         </div>
       </div>
     </section>
@@ -436,8 +545,10 @@
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script src="vendor/ethers.umd.min.js"></script>
-<script src="config.js?v=13"></script>
-<script src="demo-volunteers.js?v=13"></script>
-<script src="app.js?v=13"></script>
+<script src="config.js?v=16"></script>
+<script src="demo-volunteers.js?v=16"></script>
+<script src="app.js?v=16"></script>
+<script src="v2-abi.js?v=16"></script>
+<script src="v2.js?v=16"></script>
 </body>
 </html>

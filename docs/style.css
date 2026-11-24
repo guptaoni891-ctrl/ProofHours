@@ -644,3 +644,47 @@ details.more summary:hover { color: var(--text); }
 }
 #walletInfo + .btn { margin-top: var(--s4); }
 .panel > p.small + .table-wrap { margin-top: var(--s3); }
+
+/* ============ 13. V2: passport, Trophy Vault, issuance ============ */
+.tag { margin-left: auto; font: 500 10.5px var(--mono); color: var(--text-3); border: 1px solid var(--line-2); border-radius: 4px; padding: 1px 5px; }
+textarea { height: auto; min-height: 96px; padding: 8px 10px; line-height: 1.5; resize: vertical; }
+textarea.mono { font-family: var(--mono); font-size: 13px; }
+.v2-body { display: flex; flex-direction: column; gap: var(--s4); }
+.consent { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--s3) var(--s4); }
+.consent .msg { grid-column: 1 / -1; }
+.consent-text { display: flex; gap: var(--s3); align-items: flex-start; }
+.consent-text svg { margin-top: 1px; color: var(--text-3); }
+.consent.ok .consent-text svg { color: var(--ok); }
+.pp-summary { display: grid; grid-template-columns: minmax(180px, auto) minmax(0, 1fr); gap: var(--s5) var(--s10); padding: var(--s6); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--raised); }
+.pp-summary:empty { display: none; }
+.pp-total { display: grid; gap: 2px; }
+.pp-total span { font-size: 12.5px; color: var(--text-3); }
+.pp-total strong { font-size: 52px; font-weight: 600; letter-spacing: -.045em; line-height: 1; font-variant-numeric: tabular-nums; }
+.pp-total small { color: var(--text-3); }
+.pp-next { align-self: end; }
+.cat-list { grid-column: 1 / -1; list-style: none; margin: 0; padding: var(--s5) 0 0; border-top: 1px solid var(--line); display: grid; gap: 10px; }
+.cat { display: grid; grid-template-columns: 150px minmax(0, 1fr) 72px; gap: var(--s4); align-items: center; font-size: 13px; }
+.cat-name { color: var(--text-2); }
+.cat-bar { height: 4px; border-radius: 99px; background: var(--line-2); overflow: hidden; }
+.cat-bar span { display: block; height: 100%; width: var(--p); border-radius: inherit; background: var(--c, var(--text)); transition: width 600ms var(--ease); }
+.cat.c0 { --c: #4fc58c; } .cat.c1 { --c: #8a90f7; } .cat.c2 { --c: #f06363; } .cat.c3 { --c: #e2a640; } .cat.c4 { --c: #5bc0eb; }
+.cat-h { text-align: right; color: var(--text); }
+.cat-h em { font-style: normal; color: var(--text-3); }
+.vault { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s4); }
+.vault-empty { grid-column: 1 / -1; }
+.trophy { margin: 0; display: grid; justify-items: center; gap: var(--s2); padding: var(--s4) var(--s3); border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); text-align: center; animation: pageIn 260ms var(--ease) both; }
+.trophy img { width: 112px; height: 112px; border-radius: 16px; }
+.trophy figcaption { display: grid; gap: 2px; }
+.trophy figcaption strong { font-size: 13px; font-weight: 500; }
+.trophy figcaption span { font-size: 11.5px; color: var(--text-3); }
+.trophy.goal { border-style: dashed; background: transparent; }
+.goal-ring { width: 112px; height: 112px; border-radius: 16px; border: 1px dashed var(--line-3); position: relative; }
+.goal-ring::after { content: ""; position: absolute; inset: 26px; border-radius: 50%; border: 2px solid var(--line-2); }
+.inline-fields { display: grid; grid-template-columns: minmax(0, 220px) max-content; justify-content: start; gap: var(--s3); align-items: end; }
+@media (max-width: 760px) {
+  .pp-summary { grid-template-columns: 1fr; padding: var(--s5); }
+  .cat { grid-template-columns: 110px minmax(0, 1fr) 64px; gap: var(--s3); }
+  .consent { grid-template-columns: 1fr; }
+  .vault { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
+  .inline-fields { grid-template-columns: 1fr; }
+}

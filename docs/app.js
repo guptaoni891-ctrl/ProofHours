@@ -120,6 +120,26 @@ function explain(name, a) {
     case "NotOriginalIssuer": return `only the NGO that issued record #${a[0]} (${short(a[2])}) can correct or revoke it.`;
     case "RecordAlreadySuperseded": return `record #${a[0]} was already replaced by record #${a[1]}. Correct or revoke the latest one instead.`;
     case "RecordIsRevoked": return `record #${a[0]} is a revocation and can no longer be changed.`;
+    // V2 ledger
+    case "NotCoordinator": return `${short(a[0])} is not a V2 coordinator for any NGO.`;
+    case "NotOptedIn": return `${short(a[0])} has not opted in to receive hours yet. The volunteer must opt in on their passport first.`;
+    case "DuplicateRecord": return `this volunteer already has a record for V2 event #${a[0]}. Correct that record instead.`;
+    case "WrongOrg": return "that event or record belongs to another NGO.";
+    case "OrgIsSuspended": return `NGO #${a[0]} is suspended. New issuance is blocked until governance reinstates it.`;
+    case "ServiceDayInFuture": return "hours can only be issued after the service date.";
+    case "DailyCapExceeded": return `that would give this volunteer ${a[2]} hours on one day; the limit is ${a[3]}.`;
+    case "OrgDailyCapExceeded": return `your NGO would issue ${a[1]} hours today; its daily limit is ${a[2]}.`;
+    case "NotOrgAdmin": return `${short(a[1])} is not the admin of NGO #${a[0]}.`;
+    case "CoordinatorOfOtherOrg": return `${short(a[0])} already coordinates for NGO #${a[1]}.`;
+    case "NoLinkRequest": return `nobody has requested a link to V1 record #${a[0]} yet. The volunteer asks first, from their passport.`;
+    case "AlreadyMigrated": return `V1 record #${a[0]} is already linked (V2 record #${a[1]}).`;
+    case "NotV1Original": return `V1 record #${a[0]} is a correction or revocation. Link the original record instead.`;
+    case "NotV1Issuer": return `only the wallet that issued V1 record #${a[0]} (${short(a[2])}) can approve the link.`;
+    case "NotMigrated": return `V1 record #${a[0]} has not been linked to V2.`;
+    case "NothingToSync": return `V1 record #${a[0]} has not changed since it was linked.`;
+    case "UseV1Sync": return `record #${a[0]} was imported from V1. Correct it in V1, then sync it here.`;
+    case "LengthMismatch": return "the roster lines don't line up.";
+    case "EnforcedPause": return "issuance is paused by governance while an incident is reviewed.";
   }
   return name;
 }
@@ -157,7 +177,8 @@ const logError = (where, e) => console.error(where, { code: e?.code, shortMessag
 // ---------- Wallet + roles ----------
 let account = null, role = "none", isCoord = false, orgLabel = "", wrongNet = false, myEventCount = 0;
 
-async function walletContract() {
+// Wallet-connected contract after the network checks. V1 by default; V2 screens pass their own address/ABI.
+async function walletContract(address = C.address, abi = C.abi) {
   if (!window.ethereum) throw new Error("No wallet found. Install MetaMask to write records. (Verifying needs no wallet.)");
   const bp = new ethers.BrowserProvider(window.ethereum); // fresh each time so a network switch never breaks it
   const signer = await bp.getSigner();
@@ -168,7 +189,7 @@ async function walletContract() {
   // Fail safe: never hand a transaction to the wallet when the network could not be confirmed.
   if (!match)
     throw Object.assign(new Error(`Couldn't confirm that your wallet is on the same network as this page, because a network service is slow or not responding. Nothing was sent. Wait a moment and press Retry.`), { code: "CHAIN_UNVERIFIED" });
-  return new ethers.Contract(C.address, C.abi, signer);
+  return new ethers.Contract(address, abi, signer);
 }
 
 async function refreshRole() {
@@ -269,7 +290,8 @@ function renderTxLists() {
 }
 
 // Sends a write, keeps the button disabled until 1 confirmation, shows the tx hash. Returns the receipt or undefined.
-async function send(form, fn, argsFn) {
+// target: async () => wallet-connected contract (defaults to V1). Any contract gets the same pre-check and Retry.
+async function send(form, fn, argsFn, target = walletContract) {
   const btn = form.querySelector("button[type=submit]"), msg = form.querySelector(".msg");
   btn.disabled = true;
   btn.classList.add("busy");
@@ -278,13 +300,13 @@ async function send(form, fn, argsFn) {
   let entry;
   try {
     const args = argsFn();
-    const c = await walletContract();
+    const c = await target();
     // Dry-run as this wallet through the public RPC: any contract refusal shows here, before MetaMask opens.
-    try { await (await reader())[fn].staticCall(...args, { from: await c.runner.getAddress() }); }
+    try { await c.connect((await reader()).runner)[fn].staticCall(...args, { from: await c.runner.getAddress() }); }
     catch (e) { e.preflight = true; throw e; }
     msg.textContent = "Confirm in your wallet…";
     const tx = await c[fn](...args);
-    entry = { label: TX_LABEL[fn], hash: tx.hash, status: "pending", time: new Date() };
+    entry = { label: TX_LABEL[fn] ?? fn, hash: tx.hash, status: "pending", time: new Date() };
     sessionTx.unshift(entry);
     renderTxLists();
     msg.innerHTML = `Sent, waiting for confirmation… ${txLinks(tx.hash)}`;
@@ -293,8 +315,8 @@ async function send(form, fn, argsFn) {
     renderTxLists();
     msg.className = "msg ok";
     const what = summarize(receipt);
-    msg.innerHTML = `${ICON.check}<strong>${esc(what || TX_LABEL[fn] + " confirmed")}</strong><br>Confirmed in block ${receipt.blockNumber}. ${txLinks(tx.hash)}`;
-    toast(`${what || TX_LABEL[fn]}: confirmed on-chain`, "ok");
+    msg.innerHTML = `${ICON.check}<strong>${esc(what || (TX_LABEL[fn] ?? fn) + " confirmed")}</strong><br>Confirmed in block ${receipt.blockNumber}. ${txLinks(tx.hash)}`;
+    toast(`${what || TX_LABEL[fn] || fn}: confirmed on-chain`, "ok");
     snapshotPromise = null; // chain changed: overview and admin re-read next time
     refreshRole();
     return receipt;
@@ -317,10 +339,12 @@ async function send(form, fn, argsFn) {
 }
 
 // One plain sentence from the contract's own events in a receipt.
+// Other contracts (V2) register decoders: (log) => sentence | null
+const LOG_DECODERS = [];
 function summarize(receipt) {
   const out = [];
   for (const l of receipt.logs) {
-    if (l.address.toLowerCase() !== C.address.toLowerCase()) continue;
+    if (l.address.toLowerCase() !== C.address.toLowerCase()) { for (const d of LOG_DECODERS) { const t = d(l); if (t) out.push(t); } continue; }
     const e = iface.parseLog(l), a = e?.args;
     if (!e) continue;
     if (e.name === "EventCreated") out.push(`Event #${a.eventId} "${a.eventCode}" created (max ${a.maxDurationHours}h)`);

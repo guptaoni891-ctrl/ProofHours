@@ -29,7 +29,11 @@ window.CONFIG = {
     rpcs: ["http://127.0.0.1:8546"],
     address: "0xFbDC02860EA7d34Cd563d8Bd4420C6F713e29F9b", // same contract and records as Base Sepolia, copied into the fork
     explorers: [],
+    // V2 suite deployed by script/DeployV2.s.sol from the fixed local deployer 0x…50000001 (nonces 0 and 1)
+    v2: { ledger: "0xd714101097150109C3b0D8d30451280680ED44bA", badges: "0x64d4972B737C1ECfab6FEdE9AD201D28660a35F4" },
   },
+  // V2 contracts on Base Sepolia: not deployed yet (needs explicit approval). The V2 screens say so honestly.
+  v2: null,
   abi: [
     "error UnauthorizedAdmin(address caller)",
     "error UnauthorizedCoordinator(address caller)",

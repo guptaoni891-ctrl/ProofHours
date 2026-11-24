@@ -255,7 +255,7 @@ async function run(base) {
   for (const [w, h, label] of [[375, 812, "mobile"], [768, 1024, "tablet"], [1366, 900, "laptop"], [1920, 1080, "desktop"]]) {
     p = await open("", { width: w, height: h, ...readOnly() });
     const bad = [];
-    for (const pg of ["overview", "verify", "impact", "coord", "admin", "demo", "network"]) {
+    for (const pg of ["overview", "verify", "impact", "passport", "coord", "admin", "issue2", "demo", "network"]) {
       await nav(p, pg, 500);
       if (pg === "verify") { await p.$eval('[data-demo="S-002"]', (x) => x.click()); await sleep(3500); }
       if (pg === "impact") { await p.$eval('[data-impact-demo="S-002"]', (x) => x.click()); await sleep(3500); }
