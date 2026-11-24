@@ -1,10 +1,11 @@
 const REC = "tuple(uint256 id, uint256 eventId, bytes32 volunteerCommitment, uint16 hoursLogged, address issuer, uint64 recordedAt, uint64 recordedBlock, uint8 entryType, uint256 replacesRecordId, uint256 supersededBy, bytes32 reasonCode)";
 
 window.CONFIG = {
-  // TODO after Base Sepolia deploy: replace with the real address (this one is the local anvil deploy)
-  address: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+  // Base Sepolia deploy (Remix, 2026-11-24): tx 0x4464f73e25108e65c6465b5b518d54a386f237ee685200eac51754002483de88, block 62946611
+  address: "0xFbDC02860EA7d34Cd563d8Bd4420C6F713e29F9b",
   chainId: 84532,
   chainIdHex: "0x14a34",
+  netName: "Base Sepolia",
   // Read-only RPCs, tried in order. `?rpc=<url>` overrides (local anvil fork backup).
   rpcs: [
     "https://base-sepolia-rpc.publicnode.com",
@@ -18,6 +19,16 @@ window.CONFIG = {
   // Registered by script/Seed.s.sol; no known key, used only for the "non-issuer correction" staticCall.
   secondCoordinator: "0x000000000000000000000000000000000000dEaD",
   demoEventId: 1,
+  // Used with `?local` or a localhost `?rpc=`. Its own chain id means MetaMask can never mix it up with Base Sepolia.
+  // Start it with: anvil --chain-id 31337 --port 8546 --state .anvil/state.json   (then deploy + seed)
+  local: {
+    netName: "Anvil Local",
+    chainId: 31337,
+    chainIdHex: "0x7a69",
+    rpcs: ["http://127.0.0.1:8546"],
+    address: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    explorers: [],
+  },
   abi: [
     "error UnauthorizedAdmin(address caller)",
     "error UnauthorizedCoordinator(address caller)",

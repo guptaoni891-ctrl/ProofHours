@@ -2,3 +2,7 @@ out/
 cache/
 broadcast/
 .env
+.anvil/
+screenshots/
+.claude/
+node_modules/

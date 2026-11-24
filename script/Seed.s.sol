@@ -5,7 +5,8 @@ import {Script} from "forge-std/Script.sol";
 import {VolunteerHours} from "../src/VolunteerHours.sol";
 
 /// Seeds the demo story into an already-deployed contract.
-/// Env: ADMIN_PK, COORD_PK (testnet throwaway keys), CONTRACT (deployed address).
+/// Env: CONTRACT (deployed address), COORD_ADDR (coordinator wallet). Signs with the admin and coordinator
+/// keystores passed as `--account <admin> --account <coord>`, so no private key ever sits in env or files.
 contract Seed is Script {
     // 0x...dEaD has no known private key: it is registered only so the demo console can staticCall
     // a correction "from another NGO" and show the NotOriginalIssuer refusal.
@@ -14,19 +15,19 @@ contract Seed is Script {
     string json;
 
     function run() external {
-        uint256 adminPk = vm.envUint("ADMIN_PK");
-        uint256 coordPk = vm.envUint("COORD_PK");
         VolunteerHours v = VolunteerHours(vm.envAddress("CONTRACT"));
+        address admin = v.admin(); // whoever deployed it
+        address coord = vm.envAddress("COORD_ADDR");
 
         // demo-volunteers.js is `window.DEMO_VOLUNTEERS = [...];` (a script, so the page works from file://)
         json = vm.replace(vm.replace(vm.readFile("docs/demo-volunteers.js"), "window.DEMO_VOLUNTEERS = ", ""), ";", "");
 
-        vm.startBroadcast(adminPk);
-        v.registerCoordinator(vm.addr(coordPk), "Green Shores NGO (demo)");
+        vm.startBroadcast(admin);
+        v.registerCoordinator(coord, "Green Shores NGO (demo)");
         v.registerCoordinator(SECOND_COORDINATOR, "Desert Bloom NGO (demo)");
         vm.stopBroadcast();
 
-        vm.startBroadcast(coordPk);
+        vm.startBroadcast(coord);
         uint256 e = v.createEvent("EVT-001 Beach Cleanup (demo)", 6);
         v.recordVolunteerHours(e, commitment(0), 4); // S-001 -> VALID
         uint256 r2 = v.recordVolunteerHours(e, commitment(1), 4); // S-002
