@@ -501,6 +501,18 @@ contract ProofHoursLedgerTest is V2Fixture {
         assertEq(ledger.categoryHours(alice)[1], 6);
     }
 
+    function test_v1ImportFollowsTrailsLongerThanV1PageSize() public {
+        uint256 head = v1RecordId;
+        vm.startPrank(coord);
+        for (uint16 i; i < 30; i++) head = v1.appendCorrection(head, i == 29 ? 6 : 5, "TYPO_FIX"); // 31 entries > MAX_TRAIL 25
+        vm.stopPrank();
+        vm.prank(alice);
+        ledger.requestV1Link(v1RecordId);
+        vm.prank(coord);
+        ledger.approveV1Link(v1RecordId, ENV);
+        assertEq(ledger.totalHours(alice), 6, "hours of the true head, not the 25th entry");
+    }
+
     function test_v1CorrectionEntryIsNotAnOriginal() public {
         vm.prank(coord);
         uint256 v1c = v1.appendCorrection(v1RecordId, 6, "TYPO_FIX");

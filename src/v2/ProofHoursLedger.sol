@@ -459,6 +459,8 @@ contract ProofHoursLedger is AccessControl, Pausable {
 
     function _v1EffectiveHours(uint256 v1Id) internal view returns (uint16) {
         (IVolunteerHoursV1.V1Record memory h,) = v1.getEffectiveRecord(v1Id);
+        // V1 walks at most MAX_TRAIL (25) entries per call; continue from where it stopped (found by Slither, unused-return)
+        while (h.supersededBy != 0) (h,) = v1.getEffectiveRecord(h.id);
         return h.entryType == 2 ? 0 : h.hoursLogged;
     }
 

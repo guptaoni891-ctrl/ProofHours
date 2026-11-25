@@ -100,9 +100,17 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
   - `unsafe-oz-erc721-mint`: deliberate, to avoid receiver callbacks.
   - `reentrancy-events`: the only preceding external calls are V1 view calls.
   - `require-revert-in-loop`: deliberate, so batches are all-or-nothing.
-  - `unused-return`: the trail is intentionally ignored.
+  - `unused-return`: the trail is intentionally ignored (but see the Slither fix below).
   - `missing-events-access-control`: false positive; events are emitted.
-- **Slither / Aderyn:** **Blocked.** They aren't installed in this environment, and installing them needs approval.
+- **Slither 0.11.6:** run on `src/v2/` (102 detectors; V1, libraries and tests excluded). 10 results, triaged:
+  - **Fixed, real (`unused-return`):** importing or syncing a V1 record read `getEffectiveRecord`, which walks at most 25 entries (`MAX_TRAIL`). For a V1 record corrected 25+ times, V2 would have used a stale entry's hours. `_v1EffectiveHours` now continues from where V1 stopped. Regression test `test_v1ImportFollowsTrailsLongerThanV1PageSize` (31 entries) fails without the fix.
+  - **Accepted (`calls-loop`, 3):** the calls go to our own immutable badge contract, set at deployment. A revert there should revert the whole batch. Batch gas is paid by the coordinator who sends it, so a big batch can't block anyone else.
+  - **Accepted (`unused-return`, 2):** the ignored second value is the trail id list; only the head is needed.
+  - **Accepted (`timestamp`):** compares calendar days (`block.timestamp / 1 days`); a few seconds of validator drift can't matter except within seconds of midnight UTC, where the result is still a valid day.
+  - **Accepted (`costly-loop`, 3):** storage writes for new records and badges are the purpose of those loops.
+  - **Nothing High.**
+- **Aderyn:** **not run.** Cyfrin retired it, and its downloads were withdrawn (the official installer only prints a retirement notice). It is unmaintained, so it wasn't built from source.
+- **Not a substitute for an audit:** static analysis catches known patterns only. An independent audit is still required before mainnet.
 
 ## 5. Privacy
 - **On-chain:** wallet addresses, hours, category enums, event codes chosen by NGOs, NGO names, and evidence **hashes**.
@@ -117,4 +125,4 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
 - **NGO verification (KYB):** governance registers NGOs manually; KYB is Blocked on vendors.
 - **Evidence hashes:** attendance-based issuance uses real attendance evidence; the manual roster on the V2 issuance page still hashes the roster line.
 - **Attendance service:** local only; no forgotten-check-out flow (the coordinator can only reject); rows are updated in place rather than kept as an append-only log.
-- **Static analysers:** still not run (install approval). **No independent audit.**
+- **Static analysis:** Slither run and triaged (§4); Aderyn retired upstream. **No independent audit.**
