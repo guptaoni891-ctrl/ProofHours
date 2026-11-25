@@ -20,6 +20,7 @@ const NONCE_TTL = 300;
 const VOUCHER_DAYS = 7; // offline vouchers can be redeemed for a week after the shift
 const EARLY_CHECKIN = 30 * 60; // check-in opens 30 minutes before the shift
 const LATE_CHECKOUT = 2 * 3600; // check-out stays open 2 hours after the shift ends
+const MAX_BATCH = 25; // ~492k gas per volunteer when two badges mint (test/v2/ProofHoursV2.limits.t.sol): 25 fit the 16.7M per-transaction cap (EIP-7825)
 
 const LEDGER_ABI = [
   "function coordinatorOrg(address) view returns (uint256)",
@@ -335,8 +336,8 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
     "GET /shifts/:id/issuable": async ({ req, id }) => {
       const s = shiftById(id);
       await coordinatorFor(session(req), s.org_id);
-      const rows = q("SELECT * FROM attendance WHERE shift_id = ? AND status = 'approved' ORDER BY id").all(id);
-      return { eventId: s.event_id, attendanceIds: rows.map((r) => r.id), volunteers: rows.map((r) => r.volunteer), hours: rows.map((r) => r.hours), evidence: rows.map((r) => r.evidence_hash) };
+      const all = q("SELECT * FROM attendance WHERE shift_id = ? AND status = 'approved' ORDER BY id").all(id), rows = all.slice(0, MAX_BATCH);
+      return { eventId: s.event_id, attendanceIds: rows.map((r) => r.id), volunteers: rows.map((r) => r.volunteer), hours: rows.map((r) => r.hours), evidence: rows.map((r) => r.evidence_hash), remaining: all.length - rows.length };
     },
     // Marks attendance as issued only when the chain shows a matching HoursIssued log (event, wallet and evidence hash).
     "POST /shifts/:id/issued": async ({ req, id, body }) => {
@@ -356,14 +357,24 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
   };
 
   // Cohorts of up to 30, formed within experience bands (lifetime verified hours) so newcomers meet newcomers.
-  // shortcut: reads every member's records from the chain on each request; cache or index this past a few hundred members
+  // Members' chain reads are cached for 60 s, so league requests don't each fan out to the RPC (fresh wallets can join for free).
+  // shortcut: one chain read per member per minute; index records past a few thousand members
+  const memberCache = new Map();
+  const memberChain = (w) => {
+    const c = memberCache.get(w);
+    if (c && t() - c.at < 60) return c.data;
+    const data = Promise.all([chain.totalHours(w), chain.records(w)]);
+    memberCache.set(w, { at: t(), data });
+    data.catch(() => memberCache.delete(w)); // never cache a failed read
+    return data;
+  };
   async function league(me) {
     const mine = q("SELECT * FROM league WHERE wallet = ?").get(me);
     if (!mine) return { joined: false };
     const today = Math.floor(t() / 86400), d = new Date(t() * 1000);
     const start = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 86400000), end = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / 86400000) - 1;
     const members = await Promise.all(q("SELECT * FROM league ORDER BY joined_at, wallet").all().map(async (m) => {
-      const [life, recs] = await Promise.all([chain.totalHours(m.wallet), chain.records(m.wallet)]);
+      const [life, recs] = await memberChain(m.wallet);
       return { ...m, band: BANDS.findIndex((b) => life < b), hours: recs.filter((r) => r.serviceDay >= start && r.serviceDay <= today).reduce((a, r) => a + r.hours, 0) };
     }));
     const band = members.find((m) => m.wallet === me).band, inBand = members.filter((m) => m.band === band);
@@ -421,17 +432,20 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
 
 if (require.main === module) {
   const env = process.env;
-  let secret = env.ATTENDANCE_SECRET;
-  if (!secret) {
-    secret = crypto.randomBytes(32).toString("hex");
-    console.warn("ATTENDANCE_SECRET is not set: using a random one, so sign-ins and QR codes stop working when the service restarts.");
+  const secret = env.ATTENDANCE_SECRET;
+  // no random fallback: the vault master key and credential issuer key derive from it, so a new secret per restart would lock away every stored profile
+  if (!secret || secret.length < 32) {
+    console.error('ATTENDANCE_SECRET must be set (32+ characters, the same value for the indexer). Generate one with:\n  node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+    process.exit(1);
   }
   const chainId = Number(env.CHAIN_ID || 31337);
   const ledger = env.LEDGER || "0xd714101097150109C3b0D8d30451280680ED44bA"; // local deterministic V2 ledger (docs/config.js)
   const rpc = env.RPC_URL || "http://127.0.0.1:8546";
   const db = openDb(env.ATTENDANCE_DB || path.join(__dirname, "data", "attendance.sqlite"));
   // the vault's data keys live in their own database, so erasing a key also defeats copies of the main database
-  const keysDb = new DatabaseSync(env.VAULT_KEYS_DB || path.join(__dirname, "data", "vault-keys.sqlite"));
+  const keysFile = env.VAULT_KEYS_DB || path.join(__dirname, "data", "vault-keys.sqlite");
+  fs.mkdirSync(path.dirname(keysFile), { recursive: true });
+  const keysDb = new DatabaseSync(keysFile);
   const port = Number(env.PORT || 8790);
   const badges = env.BADGES || "0x64d4972B737C1ECfab6FEdE9AD201D28660a35F4"; // local deterministic V2 badges (docs/config.js)
   http.createServer(createApp({ db, keysDb, chain: ledgerChain(rpc, ledger, chainId, badges), secret, chainId, publicUrl: env.PUBLIC_URL || `http://127.0.0.1:${port}`, rateLimit: Number(env.RATE_LIMIT || 300), log: env.LOG_REQUESTS !== "0" }))

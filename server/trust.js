@@ -17,6 +17,7 @@ const OUTCOMES = ["dismissed", "referred-to-governance", "org-suspended"];
 const FIELDS = { displayName: 60, school: 80, bio: 280 };
 const VISIBILITY = ["private", "link", "public"];
 const STATUS_BITS = 131072; // 16 KB, the Bitstring Status List minimum
+const STATUS_TTL = 60; // seconds the public status list may be stale
 
 const b64u = (x) => Buffer.from(typeof x === "string" ? x : JSON.stringify(x)).toString("base64url");
 const kdf = (secret, info) => Buffer.from(crypto.hkdfSync("sha256", secret, "proofhours", info, 32));
@@ -88,16 +89,19 @@ function trustRoutes({ db, keysDb, chain, secret, chainId, publicUrl, t, session
 
   // ---------- credentials ----------
   const statusUrl = `${publicUrl}/credentials/status`;
+  // The list is public, so it's cached: one chain scan per STATUS_TTL however many requests arrive.
+  // shortcut: still one chain read per issued credential per scan; index badge burns past a few thousand credentials
+  let statusCache = null;
   async function revokedBits() {
+    if (statusCache && t() - statusCache.at < STATUS_TTL) return statusCache.bits;
     const bits = Buffer.alloc(STATUS_BITS / 8);
-    // shortcut: checks every issued credential's badge on the chain each time; cache or index this at scale
     for (const c of q("SELECT * FROM credentials").all()) {
       const b = await chain.badge(c.token_id);
       if (!b || b.owner !== c.wallet) bits[c.id >> 3] |= 0x80 >> (c.id & 7);
     }
+    statusCache = { at: t(), bits };
     return bits;
   }
-  const isRevoked = (bits, i) => (bits[i >> 3] & (0x80 >> (i & 7))) !== 0;
 
   // ---------- profile vault ----------
   const gcm = (k, iv, aad) => { const c = crypto.createCipheriv("aes-256-gcm", k, iv); c.setAAD(Buffer.from(aad)); return c; };
@@ -155,6 +159,7 @@ function trustRoutes({ db, keysDb, chain, secret, chainId, publicUrl, t, session
       if (!b || b.owner !== me) fail(403, "This wallet doesn't hold that badge.");
       q("INSERT OR IGNORE INTO credentials (token_id, wallet, jti, issued_at) VALUES (?, ?, ?, ?)").run(tokenId, me, `urn:uuid:${crypto.randomUUID()}`, t());
       const row = q("SELECT * FROM credentials WHERE token_id = ? AND wallet = ?").get(tokenId, me);
+      if (row.id >= STATUS_BITS) fail(503, "The credential status list is full; a new list is needed before more credentials can be issued.");
       const what = `${b.threshold}h ${b.kind === 0 ? "total" : CATS[b.kind - 1]}`;
       const vc = {
         "@context": [VC2_CONTEXT, OB3_CONTEXT], id: row.jti, type: ["VerifiableCredential", "OpenBadgeCredential"],
@@ -187,7 +192,7 @@ function trustRoutes({ db, keysDb, chain, secret, chainId, publicUrl, t, session
       checks.push({ ok: problems.length === 0, what: problems.length ? `Open Badges 3.0 structure: ${problems.join("; ")}` : "Open Badges 3.0 structure (local check)" });
       const idx = Number(vc.credentialStatus?.statusListIndex), row = q("SELECT * FROM credentials WHERE id = ?").get(idx);
       const live = row && (await chain.badge(row.token_id));
-      const notRevoked = !!row && !isRevoked(await revokedBits(), idx);
+      const notRevoked = !!live && live.owner === row.wallet; // this credential's badge only, read live (not the cached list)
       checks.push({ ok: notRevoked, what: notRevoked ? "Not revoked: the badge is still held on-chain" : "Revoked: the badge is no longer held by this wallet (burned, renounced or below its milestone)" });
       return { valid: checks.every((c) => c.ok), checks, subject: vc.credentialSubject?.id, achievement: vc.credentialSubject?.achievement?.name, token: row?.token_id ?? null, holder: live?.owner ?? null };
     },

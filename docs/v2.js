@@ -302,6 +302,7 @@
   function parseRoster(text) {
     const lines = text.split(/\n/).map((l) => l.trim()).filter(Boolean);
     if (!lines.length) throw new Error("Add at least one line: wallet address, hours.");
+    if (lines.length > 25) throw new Error(`At most 25 volunteers per transaction (you have ${lines.length}), so it fits the network's gas limit. Split the roster.`);
     return lines.map((line, i) => {
       const [addr, h] = line.split(/[\s,;]+/);
       if (!ethers.isAddress(addr)) throw new Error(`Line ${i + 1}: "${addr}" is not a wallet address.`);
@@ -524,7 +525,7 @@
     if (!receipt) return;
     try {
       const { marked } = await api(`/shifts/${current.id}/issued`, { method: "POST", body: { txHash: receipt.hash } });
-      msg.insertAdjacentHTML("beforeend", `<br>The attendance service checked the receipt and marked ${marked} attendance record${marked === 1 ? "" : "s"} as issued.`);
+      msg.insertAdjacentHTML("beforeend", `<br>The attendance service checked the receipt and marked ${marked} attendance record${marked === 1 ? "" : "s"} as issued.${iss.remaining ? ` <strong>${iss.remaining} more approved:</strong> issue again for the next batch (at most 25 per transaction).` : ""}`);
     } catch (err) { msg.insertAdjacentHTML("beforeend", `<br>${esc("Issued on-chain, but the attendance service could not be updated: " + err.message)}`); }
     loadReview(current).catch(() => {});
     loadShifts().catch(() => {});

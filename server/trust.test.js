@@ -86,6 +86,14 @@ test("Open Badges 3.0 credential: issued only to the holder, signed (did:key), O
   const idx = Number(credential.credentialStatus.statusListIndex);
   assert.equal(bits.length, 16384);
   assert.ok(bits[idx >> 3] & (0x80 >> (idx & 7)), "revocation bit set");
+  // the public list is cached: repeated requests don't each scan the chain (amplification guard)
+  let reads = 0;
+  const badge = s.chain.badge;
+  s.chain.badge = async (id) => { reads++; return badge(id); };
+  for (let i = 0; i < 5; i++) await s.call("GET", "/credentials/status");
+  assert.equal(reads, 0, "served from the cache");
+  await s.call("POST", "/credentials/verify", null, { jwt });
+  assert.equal(reads, 1, "verify reads only this credential's badge");
 });
 
 test("profile vault: encrypted at rest, per-field visibility, erasure makes every copy unreadable", async (t) => {

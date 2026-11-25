@@ -160,6 +160,22 @@ test("approval: QR and location alone issue nothing; durations computed and capp
   assert.deepEqual([iss.eventId, iss.volunteers, iss.hours, iss.evidence], [3, [s.vol.address], [8], [ok.evidenceHash]]);
 });
 
+test("issuable: at most 25 per transaction (gas cap), the rest reported as remaining", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  const sh = await s.shift({ capacity: 40 });
+  const crowd = Array.from({ length: 30 }, () => ethers.Wallet.createRandom());
+  const toks = [];
+  for (const w of crowd) { s.chain.opted.add(w.address); toks.push(await s.signIn(w)); }
+  const ids = [];
+  for (const tk of toks) { const r = await s.call("POST", "/checkin", tk, { token: await s.qr(sh.id) }); assert.equal(r.status, 200, JSON.stringify(r.body)); ids.push(r.body.id); }
+  await s.advance(1.5 * 3600, true); // stay inside the 2 h session lifetime
+  for (const tk of toks) await s.call("POST", "/checkout", tk, { token: await s.qr(sh.id, "out") });
+  for (const id of ids) assert.equal((await s.call("POST", `/attendance/${id}/approve`, s.tok.coord)).body.status, "approved");
+  const iss = (await s.call("GET", `/shifts/${sh.id}/issuable`, s.tok.coord)).body;
+  assert.deepEqual([iss.volunteers.length, iss.hours.length, iss.evidence.length, iss.remaining], [25, 25, 25, 5]);
+});
+
 test("rejection and sub-hour attendance", async (t) => {
   const s = await setup();
   t.after(s.close);
@@ -222,6 +238,15 @@ test("leagues: opt-in only, aliases not wallets, near-me strip only, season scor
   assert.deepEqual((await s.call("GET", "/league/me", s.tok.vol2)).body, { joined: false });
   const other = (await s.call("GET", "/league/me", await s.signIn(extra[0]))).body;
   assert.equal(other.cohortSize, 8, "a member who left is ranked nowhere");
+  // chain reads are cached per member for 60 s: repeated requests don't fan out to the RPC
+  let reads = 0;
+  const records = s.chain.records;
+  s.chain.records = async (a) => { reads++; return records(a); };
+  for (let i = 0; i < 5; i++) await s.call("GET", "/league/me", s.tok.vol);
+  assert.equal(reads, 0, "served from the cache");
+  await s.advance(61, true);
+  await s.call("GET", "/league/me", s.tok.vol);
+  assert.equal(reads, 9, "refreshed once per member after a minute");
 });
 
 test("operations: rate limit returns 429 with Retry-After, metrics count requests and latency", async (t) => {
