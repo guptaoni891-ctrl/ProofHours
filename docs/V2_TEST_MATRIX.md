@@ -2,20 +2,21 @@
 
 Run everything:
 ```bash
-forge test                      # Solidity: V1 + V2 unit, fuzz, invariant
-node --test server/              # attendance service + indexer (needs ethers: cd server && npm install; anvil)
+forge test                      # Solidity: V1 + V2 unit, fuzz, invariant, resource limits
+(cd server && npm ci) && node --test server/   # services (needs anvil for the indexer tests)
 node server/bench-search.js 100000 1000   # search latency benchmark
 node server/loadgen.js 50               # load test (see V2_LOAD_TEST_REPORT.md)
-cd e2e && npm install && node run.js     # browser: live read-only + isolated fork + V2 + attendance + discovery + progress + trust + accessibility
+cd e2e && npm ci && node run.js          # browser: live read-only + isolated fork + V2 + attendance + discovery + progress + trust + accessibility + journey
 node shots.js                   # visual QA screenshots (360/390/768/1440/1920)
 ```
 
-## Suites (results after Stage 6)
+## Suites (results for the release candidate, v2.0.0-rc.1)
 
 | ID | Suite | Where | What it proves | Result |
 |---|---|---|---|---|
 | F-V1 | `test/VolunteerHours.t.sol` | Foundry | V1 rules R1–R5 (unchanged) | 18/18 |
 | F-V2 | `test/v2/ProofHoursV2.t.sol` | Foundry | Permissions; consent; duplicates; hour limits; daily and NGO caps; pause; suspension; batch; corrections and revocations; badge mint, burn, renounce and reclaim; ERC-165/5192/5484 ids; every transfer path reverts; on-chain metadata; V1 migration (consent, issuer-only, once, sync on V1 correction and revocation, V1 trails longer than one 25-entry page); fuzz | 38/38 (fuzz 512 runs) |
+| F-LIM | `test/v2/ProofHoursV2.limits.t.sol` | Foundry | Measured gas: a 25-volunteer batch with two badge mints each fits the 16.7M per-transaction cap (12.4M); correction cost doesn't grow with chain length (entry 2 vs 303) and governance can still revoke; V1 trail import ~5.3k gas per entry | 3/3 |
 | F-INV | `test/v2/ProofHoursV2.invariant.t.sol` | Foundry | Totals = sum of latest entries; badge ⇔ eligibility; no orphan tokens; every run issues real records | 3 invariants × 128 runs × 64 depth (8,192 calls) |
 | E2E-L | `e2e/live.test.js` | Live Base Sepolia, read-only | Seeded V1 records validated on-chain; default network is Base Sepolia; all V1 journeys; picker; duplicate check; admin confirmations; wallet switching; wrong chain; RPC failover (including 408 timeouts); responsive layouts incl. V2 screens | 91/91 |
 | E2E-F | `e2e/fork.test.js` | Isolated fork, real signatures | V1 write journeys with throwaway keys; reject, Retry, wrong and different chain; unauthorized and revoked accounts | 32/32 |
@@ -30,13 +31,15 @@ node shots.js                   # visual QA screenshots (360/390/768/1440/1920)
 | E2E-DISC | `e2e/discover.test.js` | Isolated fork (8650) + indexer and attendance service in-process; no wallet | Ctrl+K opens the palette; prefix search; measured time shown; facet counts and filter; partial volunteer wallet finds nothing; NGO → directory; paste wallet (hours, badges) → public passport; paste tx, `record 1`, `badge 1`, `badge 99`, V1 link (opens the V1 check); directory: spots, area facets, spots-left filter, disabled empty facet, 375 px; suspended NGO's shifts disappear | 27/27 |
 | E2E-GAME | `e2e/gamify.test.js` | Isolated fork (8651) + attendance service in-process, real signatures | Arcade default; level 4, streak 4 wk + shield, Polymath, Impact Twin estimate wording, companion stage, skill trees; unlock animation on first view only; renounce (confirmed) burns, reclaim re-mints (2 txs), hours unchanged; league join/leave by alias, no wallets; Clean view remembered; new volunteer First Spark 1 of 3; direct public passport link opens in Clean with no controls; **revocation lowers level, removes Polymath, breaks streak, switches tree node off**; 375 px | 31/31 |
 | E2E-TRUST | `e2e/trust.test.js` | Isolated fork (8652) + attendance service and indexer in-process (shared secret), real signatures | Profile save (encrypted), credential issue, transcript print view, credential verify → revoked after a correction → tamper rejected, share link shows public + link fields only, erasure, NGO report = ledger, auditor role badge, alerts as allegations that change nothing, case notes, "NGO suspended" refused until the auditor's real suspend tx, reproducible sample, 375 px | 32/32 |
+| E2E-JOURNEY | `e2e/journey.test.js` | Isolated fork (8654); indexer as a real child process from env vars; attendance in-process, then restarted as a real process on the same database files | The 12 release journeys (NGO shift → discovery and consent → check in/out → approval → issueBatch → totals → badges → indexer → My Impact → public verifier → auditor evidence → report and transcript); correction and revocation (badges burned, credential revoked, report follows); restart and persistence (attendance, encrypted profile, issuer key, indexer catch-up); RPC outage on both services; unauthorized attempts at each step | 44/44 |
 | BENCH | `server/bench-search.js` | Synthetic fictional data, real index and API, 1,000 sequential queries | 1,000 events: p50 0.4 ms / p95 1.2 ms; 10,000: p50 2.7 ms / p95 3.7 ms; 100,000: p50 28.8 ms / p95 38.1 ms (server query time, localhost, Ryzen 7 7800X3D, Node 26) | measured |
 
-**Total after Stage 6:** 57 Solidity tests (+ 8,192 invariant calls), 24 Node tests (attendance 11, indexer 5, progress 5, trust 3) and 306 browser checks. All pass.
+**Total for the release candidate:** 60 Solidity tests (+ 8,192 invariant calls), 25 Node tests (attendance 12, indexer 5, progress 5, trust 3) and 350 browser checks in 9 suites. All pass. See [V2_RELEASE_CANDIDATE.md](V2_RELEASE_CANDIDATE.md).
 
 ## Not yet covered
 - **1EdTech OB 3.0 validator:** not run (external service; needs approval). Credentials are checked locally against the required structure.
 - **Real MetaMask extension:** not automated. That would need the extension download and a scripted throwaway wallet, which needs approval.
 - **Accessibility:** automated (axe) only; no manual screen-reader audit.
-- **Load and performance:** search latency is benchmarked (sequential queries on one machine), not load-tested under concurrency. The services have no rate limiting.
+- **Load and performance:** load-tested on one machine with a fake chain (see the load test report); no soak test, no real RPC latency.
+- **CI:** no CI pipeline is configured; the commands above are what it should run.
 - **Static analysis:** Slither run (1 real finding, fixed; see the security model §4). Aderyn is retired upstream and was not run.

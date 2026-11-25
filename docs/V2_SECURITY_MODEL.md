@@ -112,6 +112,25 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
 - **Aderyn:** **not run.** Cyfrin retired it, and its downloads were withdrawn (the official installer only prints a retirement notice). It is unmaintained, so it wasn't built from source.
 - **Not a substitute for an audit:** static analysis catches known patterns only. An independent audit is still required before mainnet.
 
+### Release-candidate review (resource limits and amplification)
+Measured in `test/v2/ProofHoursV2.limits.t.sol` (gas) and the service tests:
+
+| Loop or path | Who controls its size | Measured | Verdict |
+|---|---|---|---|
+| `issueBatch` over volunteers | The coordinator who sends (and pays for) it | ~495k gas per volunteer with two badge mints; 100 volunteers = 49M gas, over the 16.7M per-transaction cap (EIP-7825) | **Fixed:** batches capped at 25 (12.4M gas) in the attendance service (`MAX_BATCH`, the rest reported as `remaining`) and the manual roster. Tests: S-ATT "issuable: at most 25", F-V2 limits |
+| `badges.sync`, `resyncBadges` | Fixed: 6 + 5 thresholds, 5 categories | constant | Bounded |
+| V2 correction chain (`_head`) | The record's own NGO coordinators | `correct`/`revoke` take the head id and never walk the chain: 323k gas at entry 2 and at entry 303 | Bounded for writes. Only the `headOf` view walks (one storage read per entry): breaking it for one record would take tens of thousands of corrections by that NGO, and governance can still revoke. Test: F-V2 limits |
+| V1 trail import (`_v1EffectiveHours`) | The V1 issuer of that record (V1 is immutable) | ~5.3k gas per V1 entry, so ~3,000 entries fill a transaction | **Residual (low):** a V1 issuer who corrects one record ~3,000 times can stop `syncV1`/`approveV1Link` for it, freezing that record's V2 hours. Governance can revoke the V2 record in constant gas. Test: F-V2 limits |
+| Public credential status list | Anyone (public endpoint); size = issued credentials | was one chain read per credential per request | **Fixed:** list cached 60 s (may be up to 60 s stale; the verifier checks the single credential live). Issuance refuses once the 131,072-entry list is full, so no credential can sit outside it. Test: S-TRUST |
+| League ranking | Anyone with a wallet can join (sign-in is free) | was two chain reads per member per request | **Fixed:** member reads cached 60 s per wallet. Test: S-ATT leagues |
+| Request bodies / search | Clients | 16 KB body limit; search ≤ 8 terms, ≤ 50 results, parameterised SQL | Bounded |
+
+Other release-candidate findings:
+- **Fixed (data loss):** without `ATTENDANCE_SECRET` the service used to start with a random secret. The vault master key and the credential issuer key derive from it, so a restart would have made stored profiles unreadable and earlier credentials unverifiable. It now refuses to start.
+- **Accepted:** `/metrics` is public on both services (request counts and latencies only); restrict it at the proxy in staging.
+- **Accepted (documented, §3):** a QR code forwarded to someone nearby works for up to 60 s; supervisor approval is the control.
+- **Accepted:** the `issued` endpoint trusts a receipt after one confirmation; on Base the sequencer makes reorgs rare, and the indexer (with its confirmation depth) is the source for reports.
+
 ## 5. Privacy
 - **On-chain:** wallet addresses, hours, category enums, event codes chosen by NGOs, NGO names, and evidence **hashes**.
   - Event codes and NGO names are public by design; NGOs must not put personal data in them, and the UI says so.
@@ -126,3 +145,4 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
 - **Evidence hashes:** attendance-based issuance uses real attendance evidence; the manual roster on the V2 issuance page still hashes the roster line.
 - **Attendance service:** local only; no forgotten-check-out flow (the coordinator can only reject); rows are updated in place rather than kept as an append-only log.
 - **Static analysis:** Slither run and triaged (§4); Aderyn retired upstream. **No independent audit.**
+- **Database access:** SQLite files protected only by the operating system's file permissions; no database users or roles. Restrict the data folders to the service account in staging.

@@ -15,9 +15,10 @@ Local and testnet only. Any public deployment, public hosting or real-data use n
 ## 2. Start and stop
 ```bash
 export ATTENDANCE_SECRET=<32+ random bytes, from a secret store>   # same value for both
-node server/attendance.js     # RATE_LIMIT=300/min per client by default; LOG_REQUESTS=0 to silence access logs
+node server/attendance.js     # refuses to start without ATTENDANCE_SECRET; RATE_LIMIT=300/min per client by default; LOG_REQUESTS=0 to silence access logs
 node server/indexer.js        # RATE_LIMIT=600; CONFIRMATIONS=2; START_BLOCK found automatically
 ```
+- **Env file:** `node --env-file=.env attendance.js` (template: `server/.env.example`).
 - **Stop:** send Ctrl+C / SIGTERM. SQLite commits each request, so no write is half-done.
 - **Access logs:** JSON lines on stdout `{t, service, method, path, status, ms}`. They carry the path only: no query strings, headers, tokens or wallets.
 
