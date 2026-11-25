@@ -143,11 +143,11 @@ test("Stage 5: anomaly alerts are allegations, samples are reproducible, reports
   assert.deepEqual(s1, s2, "same seed, same sample");
   assert.equal(s1.population, 10);
 
-  const secret = "shared-secret";
-  const api = http.createServer(createApi({ db, indexer: ix, provider: c.provider, confirmations: 0, ledger: c.address, secret }));
+  const keys = session.sessionKeys("attendance-service-secret"); // the indexer only ever gets the public half
+  const api = http.createServer(createApi({ db, indexer: ix, provider: c.provider, confirmations: 0, ledger: c.address, sessionPublicKey: keys.publicKey }));
   await new Promise((res) => api.listen(0, "127.0.0.1", res));
   t.after(() => api.close());
-  const get = (p, who) => fetch(`http://127.0.0.1:${api.address().port}${p}`, { headers: who ? { authorization: "Bearer " + session.issue(secret, who, Math.floor(Date.now() / 1000) + 600) } : {} });
+  const get = (p, who) => fetch(`http://127.0.0.1:${api.address().port}${p}`, { headers: who ? { authorization: "Bearer " + session.issue(keys.privateKey, who, Math.floor(Date.now() / 1000) + 600) } : {} });
   assert.equal((await get("/audit/alerts")).status, 401);
   assert.equal((await get("/audit/alerts", c.coord.address)).status, 403, "coordinators can't see allegations");
   const res = await get("/audit/alerts", auditor.address);
@@ -157,4 +157,36 @@ test("Stage 5: anomaly alerts are allegations, samples are reproducible, reports
   assert.equal(smp.rate, 0.05, "rate clamped to 2–5%");
   assert.deepEqual(smp.records, s1.records);
   assert.equal((await (await get("/reports/org/1")).json()).totalHours, chainTotal, "NGO reports are public");
+});
+
+// ---------- security / robustness regressions (backend review) ----------
+
+test("findDeployBlock: RPC errors stop the indexer instead of silently skipping early history (unless told it's a fork)", async () => {
+  const provider = { getBlockNumber: async () => 100, getCode: async (_a, n) => { if (n < 60) throw new Error("missing trie node"); return n >= 40 ? "0x60" : "0x"; } };
+  await assert.rejects(findDeployBlock(provider, ethers.ZeroAddress), /START_BLOCK/);
+  assert.equal(await findDeployBlock(provider, ethers.ZeroAddress, { tolerateErrors: true }), 60, "a fork can opt in to the old behaviour");
+});
+
+test("incremental indexing gives exactly what a full rebuild gives; bad query parameters get 400", async (t) => {
+  const c = await chain(t);
+  const { rebuild } = require("./indexer");
+  const db = openDb(":memory:");
+  const ix = createIndexer({ db, provider: c.provider, ledger: c.address, startBlock: await findDeployBlock(c.provider, c.address), confirmations: 0 });
+  await c.event("EVT-701 Park Cleanup (demo)");
+  await ix.syncAll(); // batch 1
+  await (await c.ledger.connect(c.coord).issueHours(1, c.vol.address, 4, ethers.ZeroHash)).wait();
+  await (await c.ledger.connect(c.coord).correct(1, 3, ethers.encodeBytes32String("FIX"))).wait();
+  await (await c.ledger.suspendOrg(1)).wait();
+  await ix.syncAll(); // batch 2: applied incrementally on top of batch 1
+  const dump = () => JSON.stringify(["records", "orgs", "events", "docs"].map((tb) => db.prepare(`SELECT * FROM ${tb} ORDER BY 1, 2`).all()));
+  const incremental = dump();
+  rebuild(db);
+  assert.equal(dump(), incremental);
+  assert.equal(db.prepare("SELECT head_hours FROM records WHERE id = 1").get().head_hours, 3, "the original carries its corrected head");
+  assert.match(db.prepare("SELECT body FROM docs WHERE kind = 'org'").get().body, /suspended/, "the NGO's search entry follows its status");
+  const api = http.createServer(createApi({ db, indexer: ix, provider: c.provider, confirmations: 0 }));
+  await new Promise((r) => api.listen(0, "127.0.0.1", r));
+  t.after(() => api.close());
+  const status = (p) => fetch(`http://127.0.0.1:${api.address().port}${p}`).then((r) => r.status);
+  assert.deepEqual(await Promise.all(["/search?q=park&category=abc", "/search?org=1e9", "/reports/org/1?from=2026-13-45", "/search?q=park&category=0"].map(status)), [400, 400, 400, 200]);
 });

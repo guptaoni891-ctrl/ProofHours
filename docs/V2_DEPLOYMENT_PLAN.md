@@ -30,7 +30,7 @@ python -m http.server 8765 --directory docs    # open http://localhost:8765/?loc
 ```
 - **Env file:** copy `server/.env.example` to `server/.env` (gitignored) and run `node --env-file=.env attendance.js` from `server/`; no extra package needed.
 - **Attendance service:** needs `ethers` (`cd server && npm ci`). Settings: `PORT` (8790), `RPC_URL` (`http://127.0.0.1:8546`), `LEDGER` (local ledger address), `CHAIN_ID` (31337), `ATTENDANCE_DB` (`server/data/attendance.sqlite`). The page finds it through `config.js` → `local.attendance`, or `?api=` for another address.
-- **Stage 5 settings (attendance service):** `VAULT_KEYS_DB` (`server/data/vault-keys.sqlite`, keep it apart from the main database and its backups), `PUBLIC_URL` (used in credential status links), `BADGES` (badge contract). The indexer needs the **same** `ATTENDANCE_SECRET` for auditor views.
+- **Stage 5 settings (attendance service):** `VAULT_KEYS_DB` (`server/data/vault-keys.sqlite`, keep it apart from the main database and its backups), `PUBLIC_URL` (used in credential status links), `BADGES` (badge contract). The indexer never gets `ATTENDANCE_SECRET`: give it `SESSION_PUBLIC_KEY` (printed by the attendance service, also at `GET /auth/public-key`) for auditor views. The attendance service also needs `APP_ORIGINS` (the front end's origin, for Sign-In with Ethereum); both need `TRUST_PROXY=1` behind the proxy and `START_BLOCK` for the indexer.
 - **Indexer:** settings `PORT` (8792), `RPC_URL`, `LEDGER`, `CHAIN_ID`, `CONFIRMATIONS` (2), `START_BLOCK` (found automatically), `POLL_MS` (2000), `INDEXER_DB` (`server/data/indexer.sqlite`). The page finds it through `config.js` → `local.indexer`, or `?search=`. To rebuild from scratch, stop it and delete the database file.
 - **Search benchmark:** `node server/bench-search.js 100000 1000`.
 - **Load test:** `node server/loadgen.js 50` (results in [V2_LOAD_TEST_REPORT.md](V2_LOAD_TEST_REPORT.md)).
@@ -67,7 +67,7 @@ forge build --force && forge test                 # contracts: 60 tests incl. fu
 6. **Governance actions** through the multisig: register NGOs, assign NGO admins, grant the auditor role.
 7. **Services (hosting needs approval; it may be a paid service):**
    - one host for the attendance service and one for the indexer, behind HTTPS (the site's CSP allows `https:` connections);
-   - environment from `server/.env.example`: `RPC_URL` = a Base Sepolia RPC, `CHAIN_ID=84532`, `LEDGER`/`BADGES` = the deployed addresses, `ATTENDANCE_SECRET` from a secret store (same for both), `PUBLIC_URL` = the attendance service's public HTTPS URL (it is written into credentials, so keep it stable), `CONFIRMATIONS=2` or more, `START_BLOCK` = the ledger's deploy block;
+   - environment from `server/.env.example`: `RPC_URL` = a Base Sepolia RPC, `CHAIN_ID=84532`, `LEDGER`/`BADGES` = the deployed addresses, `ATTENDANCE_SECRET` from a secret store (attendance service only; the indexer gets `SESSION_PUBLIC_KEY`), `PUBLIC_URL` = the attendance service's public HTTPS URL (it is written into credentials, so keep it stable), `CONFIRMATIONS=2` or more, `START_BLOCK` = the ledger's deploy block;
    - `VAULT_KEYS_DB` on a separate volume with its own backups (runbooks §4); `/metrics` restricted to operators at the proxy;
    - health checks: `GET /health` on both (the indexer's `behind` should stay near 0).
 8. **Front end:** set `config.js` → `v2` (addresses), `attendance` and `indexer` (HTTPS URLs) on a staging branch or a separate Pages site, never on `main` until approved.

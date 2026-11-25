@@ -51,8 +51,10 @@ test("audit cases: auditors only; outcomes are human decisions; 'NGO suspended' 
   assert.deepEqual([closed.status, closed.outcome], ["closed", "org-suspended"]);
   assert.match((await s.call("POST", `/cases/${c.id}/note`, s.tok.auditor, { text: "late" })).body.error, /closed/);
   const ex = (await s.call("GET", `/cases/${c.id}/export`, s.tok.auditor)).body;
-  const { sha256, ...bundle } = ex;
+  const { sha256, signature, ...bundle } = ex;
   assert.equal(sha256, crypto.createHash("sha256").update(JSON.stringify(bundle)).digest("hex"), "the bundle hash verifies");
+  const key = issuerKey("trust-secret"), sig = readJwt(signature, key);
+  assert.ok(sig.signatureOk && sig.payload.sha256 === sha256, "the issuer's signature covers the hash, so an edited copy can't be re-hashed into a valid one");
 });
 
 test("Open Badges 3.0 credential: issued only to the holder, signed (did:key), OB3 structure, revoked once the badge is gone", async (t) => {
@@ -117,4 +119,67 @@ test("profile vault: encrypted at rest, per-field visibility, erasure makes ever
   // the backup copy can't be decrypted: its key is gone, and guessing keys fails authentication
   assert.equal(s.keysDb.prepare("SELECT * FROM keys WHERE wallet = ?").get(s.vol.address), undefined);
   assert.throws(() => { const d = crypto.createDecipheriv("aes-256-gcm", crypto.randomBytes(32), backup.iv); d.setAAD(Buffer.from(s.vol.address)); d.setAuthTag(backup.tag); Buffer.concat([d.update(backup.data), d.final()]); });
+});
+
+// ---------- security regressions (backend review) ----------
+
+test("verifier: a credential signed with the forger's own key is rejected, even if it names this issuer and a real status entry", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  const { credential } = (await s.call("POST", "/credentials", s.tok.vol, { tokenId: "1" })).body;
+  const { privateKey, publicKey } = crypto.generateKeyPairSync("ed25519");
+  const x = Buffer.from(publicKey.export({ format: "jwk" }).x, "base64url");
+  const forgerDid = "did:key:z" + ethers.encodeBase58(Buffer.concat([Buffer.from([0xed, 0x01]), x]));
+  const vc = structuredClone(credential);
+  vc.credentialSubject.id = "did:pkh:eip155:31337:0x000000000000000000000000000000000000dEaD";
+  vc.credentialSubject.achievement.name = "500h Healthcare";
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const head = b64({ alg: "EdDSA", typ: "JWT", kid: `${forgerDid}#x` }), body = b64({ iss: credential.issuer.id, sub: vc.credentialSubject.id, jti: vc.id, vc });
+  const jwt = `${head}.${body}.${crypto.sign(null, Buffer.from(`${head}.${body}`), privateKey).toString("base64url")}`;
+  const v = (await s.call("POST", "/credentials/verify", null, { jwt })).body;
+  assert.equal(v.valid, false);
+  assert.equal(v.checks[0].ok, false, "the signature check uses this deployment's key, not the one the token names");
+  assert.equal(v.holder, null, "a forged token triggers no chain read");
+});
+
+test("verifier: a genuine credential can't borrow another credential's status entry", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  const a = (await s.call("POST", "/credentials", s.tok.vol, { tokenId: "1" })).body, b = (await s.call("POST", "/credentials", s.tok.vol, { tokenId: "2" })).body;
+  const key = issuerKey("trust-secret"), p = readJwt(a.jwt, key).payload;
+  p.vc.credentialStatus.statusListIndex = b.credential.credentialStatus.statusListIndex; // re-signed by the real key, but pointing at b's row
+  const head = Buffer.from(JSON.stringify({ alg: "EdDSA", typ: "JWT", kid: key.kid })).toString("base64url"), body = Buffer.from(JSON.stringify(p)).toString("base64url");
+  const jwt = `${head}.${body}.${crypto.sign(null, Buffer.from(`${head}.${body}`), key.privateKey).toString("base64url")}`;
+  const v = (await s.call("POST", "/credentials/verify", null, { jwt })).body;
+  assert.equal(v.valid, false);
+  assert.match(v.checks.find((c) => !c.ok).what, /Doesn't match any credential/);
+});
+
+test("public profile: any address letter case and any link key bytes are handled (400/200, never 500)", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  await s.call("PUT", "/profile", s.tok.vol, { fields: { bio: "hi" }, visibility: { bio: "link" } });
+  const mixed = "0x" + [...s.vol.address.slice(2)].map((c, i) => (i % 2 ? c.toLowerCase() : c.toUpperCase())).join("");
+  assert.equal((await s.call("GET", `/profile/public/${mixed}`)).status, 200);
+  const r = await s.call("GET", `/profile/public/${s.vol.address}?k=${encodeURIComponent("é".repeat(16))}`);
+  assert.deepEqual([r.status, r.body.fields], [200, {}]);
+});
+
+test("erasure: the destroyed data key is overwritten on disk, not left in SQLite's free pages", async (t) => {
+  const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ph-vault-")), "keys.sqlite");
+  const keysDb = new DatabaseSync(file), vol = ethers.Wallet.createRandom();
+  const chain = { optedIn: async () => true, coordinatorOrg: async () => 0 };
+  const server = http.createServer(createApp({ db: openDb(":memory:"), keysDb, chain, secret: "vault-secret", chainId: 31337 }));
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = async (method, p, token, body) => (await fetch(base + p, { method, headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: body && JSON.stringify(body) })).json();
+  const n = await call("POST", "/auth/nonce", null, { address: vol.address });
+  const { token } = await call("POST", "/auth", null, { address: vol.address, nonce: n.nonce, signature: await vol.signMessage(n.message) });
+  await call("PUT", "/profile", token, { fields: { bio: "secret bio" } });
+  const wrapped = Buffer.from(keysDb.prepare("SELECT wrapped FROM keys").get().wrapped);
+  await call("DELETE", "/profile", token);
+  keysDb.close();
+  assert.ok(!fs.readFileSync(file).includes(wrapped), "wrapped key bytes are gone from the file");
 });

@@ -39,17 +39,20 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
 | Threat | Mitigation | Evidence |
 |---|---|---|
 | Hours from a scan alone | The service cannot issue hours. Hours need a coordinator's approval **and** an `issueBatch` signed by that coordinator's wallet | S-ATT "QR and location alone issue nothing"; E2E-ATT chain checks |
-| Forged or edited QR code | HMAC-SHA256 with `ATTENDANCE_SECRET`; editing the window or kind breaks the MAC; constant-time compare | S-ATT |
-| Photo of the QR sent to someone absent | Code valid ≤ 60 s; one check-in per wallet; optional site yes/no; supervisor review. **Limit:** someone nearby within 60 s can still check in a wallet they control, so supervisors should know their volunteers | design |
-| Session theft or forgery | HMAC bearer token bound to the wallet and expiry; 2 h lifetime; nonce consumed on use | S-ATT sign-in tests |
+| Forged or edited QR code | HMAC-SHA256 with a QR-only subkey of `ATTENDANCE_SECRET` (HKDF); editing the window or kind breaks the MAC; constant-time compare | S-ATT |
+| Photo of the QR sent to someone absent | Code valid ≤ 60 s; one check-in per wallet; the **service** checks a location reading against the site area (a client's own yes/no is ignored); shifts with `requireSite` refuse check-in/out without an on-site reading; supervisor review. **Limit:** a spoofed GPS reading still passes, so supervisors should know their volunteers | S-ATT "requireSite" |
+| Session theft or forgery | Ed25519-signed bearer token bound to the wallet and expiry; 2 h lifetime. Only the attendance service holds the signing key; the indexer verifies with the public key, so it can't mint sessions | S-ATT sign-in tests, S-IDX Stage 5 |
+| Phishing relay of the sign-in signature | Sign-In with Ethereum (EIP-4361) message naming the front end's domain (wallets warn on a mismatch); only `APP_ORIGINS` can request one; the nonce is bound to one wallet and the exact message | S-ATT "Sign-In with Ethereum" |
 | Wrong NGO approving | Coordinator's NGO read from the ledger on every shift, QR, review and approval call; suspended NGOs refused | S-ATT |
 | Service marking hours issued that weren't | Marked only when the receipt has a matching `HoursIssued` (event, wallet, evidence hash) | S-ATT `issued` test; E2E-ATT |
 | Guessing attendance times from the public evidence hash | Evidence JSON includes a random 128-bit salt | design |
-| Location privacy | Only yes/no leaves the device; coordinates are never accepted or stored | S-ATT; E2E-ATT checks the database |
-| Abuse / flooding | **Not mitigated yet:** no rate limiting. The service binds to 127.0.0.1. Add rate limits before any public hosting | open |
-| Secret handling | `ATTENDANCE_SECRET` from the environment; if missing, a random per-process secret (sessions and codes end on restart) with a warning | design |
+| Location privacy | With the volunteer's consent, one reading is sent over TLS, compared with the site area and discarded; only the yes/no result is stored. Access logs never include bodies | S-ATT "requireSite" (database has no coordinates) |
+| Abuse / flooding | Per-client rate limits; behind a proxy set `TRUST_PROXY=1` so the client is the proxy's last `X-Forwarded-For` hop, not one shared bucket | S-ATT rate-limit tests |
+| Secret handling | `ATTENDANCE_SECRET` required (no random fallback). Every use has its own HKDF subkey: sessions, QR, vouchers, credential issuer, vault master | design |
+| One volunteer blocking a shift's batch | `/issuable` checks each line against the chain (opt-in, existing record, daily cap, NGO cap) and holds back the ones that would revert, with a reason; approved rows can still be rejected | S-ATT "issuable: lines the ledger would refuse" |
+| Double-counted time (voucher + QR) | Open check-ins count as running until closed; QR check-in refuses times already covered by a voucher | S-ATT "no double counting" |
 | Clock skew | QR rotation is timed by the service's clock (it returns `now`), not the device's | E2E-ATT (service clock jumped 10 h) |
-| Receipt finality | **Shortcut:** one confirmation. On a public chain, wait for N confirmations (Stage 3 indexer) | open |
+| Receipt finality | `CONFIRMATIONS` (default 3 on public chains, 1 locally) before attendance is marked issued; the app retries until then | S-ATT "issued: waits for confirmations" |
 
 **Data held:** wallet addresses, check-in/out times, site yes/no flags, decisions, reasons typed by coordinators, evidence JSON, record ids and tx hashes. No names, emails or coordinates. A retention policy and erasure path belong to Stage 5 (consent vault) and need legal review.
 
@@ -77,10 +80,10 @@ Tests: `test/v2/ProofHoursV2.t.sol` (permission, cap, pause, suspension and migr
 |---|---|---|
 | Allegations treated as findings or acted on automatically | Alerts only list; cases need a person; suspension needs the auditor's own transaction; "NGO suspended" outcome checked against the chain | E2E-TRUST |
 | Allegations leaking | Alert and sample views need an auditor wallet sign-in and `AUDITOR_ROLE` | S-IDX |
-| Forged or altered credentials | EdDSA signature over the JWT; issuer DID must match this deployment | S-TRUST tamper test; E2E-TRUST |
+| Forged or altered credentials | EdDSA signature checked against **this deployment's** issuer key only (a key named in the token's header proves nothing); the status entry must be the credential's own (jti, holder, badge) | S-TRUST tamper and forgery tests; E2E-TRUST |
 | A credential outliving its badge | Status list and verifier check that the badge is still held | S-TRUST, E2E-TRUST (correction revokes) |
 | Profile data exposure | Encrypted at rest; private fields never served; link fields only with the share key (constant-time compare) | S-TRUST, E2E-TRUST |
-| Data that should be gone surviving in backups | Crypto-shredding with keys in a separate database | S-TRUST erasure test |
+| Data that should be gone surviving in backups | Crypto-shredding with keys in a separate database; `secure_delete` overwrites the destroyed key on disk. **Limit:** filesystem copies of SQLite's rollback journal and old backups of the key database need full-disk encryption / backup expiry | S-TRUST erasure tests |
 | CSV formula injection in reports | Cells quoted; leading `= + - @` neutralised | code |
 | Key management | **Shortcut:** issuer and vault master keys derived from `ATTENDANCE_SECRET`. Production needs a KMS/HSM (Blocked) | open |
 
@@ -122,14 +125,14 @@ Measured in `test/v2/ProofHoursV2.limits.t.sol` (gas) and the service tests:
 | V2 correction chain (`_head`) | The record's own NGO coordinators | `correct`/`revoke` take the head id and never walk the chain: 323k gas at entry 2 and at entry 303 | Bounded for writes. Only the `headOf` view walks (one storage read per entry): breaking it for one record would take tens of thousands of corrections by that NGO, and governance can still revoke. Test: F-V2 limits |
 | V1 trail import (`_v1EffectiveHours`) | The V1 issuer of that record (V1 is immutable) | ~5.3k gas per V1 entry, so ~3,000 entries fill a transaction | **Residual (low):** a V1 issuer who corrects one record ~3,000 times can stop `syncV1`/`approveV1Link` for it, freezing that record's V2 hours. Governance can revoke the V2 record in constant gas. Test: F-V2 limits |
 | Public credential status list | Anyone (public endpoint); size = issued credentials | was one chain read per credential per request | **Fixed:** list cached 60 s (may be up to 60 s stale; the verifier checks the single credential live). Issuance refuses once the 131,072-entry list is full, so no credential can sit outside it. Test: S-TRUST |
-| League ranking | Anyone with a wallet can join (sign-in is free) | was two chain reads per member per request | **Fixed:** member reads cached 60 s per wallet. Test: S-ATT leagues |
+| League ranking | Members need at least one NGO-verified hour to join; at most 5,000 | was two chain reads per member per request | **Fixed:** one shared league snapshot per 60 s (concurrent requests share it, 8 reads at a time). Test: S-ATT leagues |
 | Request bodies / search | Clients | 16 KB body limit; search ≤ 8 terms, ≤ 50 results, parameterised SQL | Bounded |
 
 Other release-candidate findings:
 - **Fixed (data loss):** without `ATTENDANCE_SECRET` the service used to start with a random secret. The vault master key and the credential issuer key derive from it, so a restart would have made stored profiles unreadable and earlier credentials unverifiable. It now refuses to start.
-- **Accepted:** `/metrics` is public on both services (request counts and latencies only); restrict it at the proxy in staging.
+- **Fixed:** `/metrics` needs `METRICS_TOKEN` (bearer) or a direct loopback connection; proxied requests without `TRUST_PROXY` are refused.
 - **Accepted (documented, §3):** a QR code forwarded to someone nearby works for up to 60 s; supervisor approval is the control.
-- **Accepted:** the `issued` endpoint trusts a receipt after one confirmation; on Base the sequencer makes reorgs rare, and the indexer (with its confirmation depth) is the source for reports.
+- **Fixed:** the `issued` endpoint waits for `CONFIRMATIONS` before trusting a receipt.
 
 ## 5. Privacy
 - **On-chain:** wallet addresses, hours, category enums, event codes chosen by NGOs, NGO names, and evidence **hashes**.
@@ -146,3 +149,27 @@ Other release-candidate findings:
 - **Attendance service:** local only; no forgotten-check-out flow (the coordinator can only reject); rows are updated in place rather than kept as an append-only log.
 - **Static analysis:** Slither run and triaged (§4); Aderyn retired upstream. **No independent audit.**
 - **Database access:** SQLite files protected only by the operating system's file permissions; no database users or roles. Restrict the data folders to the service account in staging.
+
+## 7. Backend security review fixes (November 2026)
+An adversarial review of the services and contracts found the issues below. Each fix has a regression test that fails without it.
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| 1 | Credential verifier trusted the key named in the JWT header, so self-signed forgeries verified | Verify only with this deployment's issuer key; bind the status entry to the credential's jti, holder and badge | S-TRUST "verifier: …forger's own key", "…borrow another credential's status entry" |
+| 2 | Anyone could overwrite a V1 link request and front-run the NGO's approval to steal migrated hours | Requests are per (record, wallet); `approveV1Link(v1Id, volunteer, category)` names the wallet the NGO checked | F-V2 `test_v1LinkCannotBeHijackedByFrontRunning`, `test_v1ApproveNeedsTheNamedWalletsOwnRequest` |
+| 3 | One secret signed sessions and keyed everything, and the public indexer held it | Ed25519 sessions (indexer gets `SESSION_PUBLIC_KEY` only); HKDF subkey per purpose | S-ATT SIWE test, S-IDX Stage 5 |
+| 4 | One opted-out/capped volunteer made every `issueBatch` for a shift revert, and approved rows couldn't be rejected | Chain pre-check in `/issuable` with `blocked` reasons; approved rows rejectable | S-ATT "issuable: lines the ledger would refuse" |
+| 5 | Site check was a client-supplied yes/no | Server-side check of a location reading; optional `requireSite` | S-ATT "requireSite" |
+| 6 | Rate limit keyed on the socket, so behind a proxy all users shared one bucket | `TRUST_PROXY=1` uses the proxy's last `X-Forwarded-For` hop; client map bounded | S-ATT "rate limit behind a trusted proxy" |
+| 7 | Voucher + open QR check-in counted the same time twice | Open check-ins run until closed; QR check-in checks closed attendance too | S-ATT "no double counting" |
+| 8 | Events could be dated any day in the past (even day 0), bypassing the 12 h/day cap | `serviceDay` must be within 90 days back / 366 ahead, never 0 | F-V2 `test_eventsCannotBeDatedOutsideTheWindow` |
+| 9 | `syncV1` raised V2 hours while paused or suspended, outside caps; V1 coordinators could mint new V1 records and import them | Increases obey pause, suspension, opt-in and the NGO cap (imports too); only V1 records from before V2's deployment can be imported | F-V2 `test_v1SyncIncreaseObeysPause…`, `test_v1RecordsCreatedAfterV2DeployCannotBeImported` |
+| 10 | Erased vault keys stayed in SQLite free pages | `PRAGMA secure_delete = ON` | S-TRUST "erasure: …overwritten on disk" |
+| 11 | Sign-in message had no domain (phishable) | EIP-4361 with an origin allowlist (`APP_ORIGINS`) | S-ATT SIWE test |
+| 12 | Cheap requests fanned out into unbounded RPC calls | League snapshot + entry ticket; status list scan shared and bounded; auth before chain reads; cached `/health` head | S-ATT leagues, S-TRUST status cache |
+| 13 | Indexer rebuilt every table on every change, blocking its API | Incremental updates (full rebuild only after a reorg); reports are one indexed SQL query | S-IDX "incremental indexing gives exactly what a full rebuild gives" |
+| 14 | Deploy-block search treated RPC errors as "no code", silently skipping history | Errors are fatal unless on a local fork; `START_BLOCK` required on public chains | S-IDX "findDeployBlock" |
+| 15 | `issued` trusted one confirmation | `CONFIRMATIONS` before marking | S-ATT "issued: waits for confirmations" |
+| 16–23 | `getEvent` "not found" never fired; `null`/non-object bodies, bad-checksum addresses and non-ASCII link keys gave 500s; case-close race; unsigned case export; opt-out ignored by V1 approval and upward corrections; auditor pause not wired in deploys; status-list off-by-one; public `/metrics`; voucher wording | Fixed individually (unknown events → 404; 400s; re-check after await; issuer-signed export; consent checks; `AUDITOR` env in `DeployV2`; capacity checked before insert; `METRICS_TOKEN`; wording) | S-ATT, S-TRUST, F-V2 regression tests |
+
+**Still open (needs infrastructure or an audit, not code):** KMS/HSM for the issuer and vault keys; GPS spoofing (supervisor review remains the control); an independent audit before mainnet.

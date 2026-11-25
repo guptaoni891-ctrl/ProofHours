@@ -64,7 +64,7 @@ async function run(base) {
     await (await d.ledger.setCoordinator(coord.address, 1)).wait();
     await (await d.ledger.grantRole(await d.ledger.AUDITOR_ROLE(), auditor.address)).wait();
     const secret = ethers.hexlify(ethers.randomBytes(32)).slice(2);
-    const chainEnv = { RPC_URL: FORK, LEDGER: d.addresses.ledger, BADGES: d.addresses.badges, CHAIN_ID: "31337", ATTENDANCE_SECRET: secret };
+    const chainEnv = { RPC_URL: FORK, LEDGER: d.addresses.ledger, BADGES: d.addresses.badges, CHAIN_ID: "31337", ATTENDANCE_SECRET: secret, SESSION_PUBLIC_KEY: require(path.join(SERVER, "session.js")).sessionKeys(secret).publicKey }; // the indexer only gets the public key
     indexer = startService("indexer.js", { ...chainEnv, PORT: String(IDX), CONFIRMATIONS: "0", START_BLOCK: String(forkBlock + 1), POLL_MS: "300", INDEXER_DB: files.idx });
     let clock = Date.now();
     const attDb = att.openDb(files.att), keysDb = new DatabaseSync(files.keys);

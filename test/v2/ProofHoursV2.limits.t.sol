@@ -64,7 +64,7 @@ contract ProofHoursV2Limits is V2Fixture {
         ledger.requestV1Link(v1RecordId);
         vm.prank(coord);
         uint256 g = gasleft();
-        ledger.approveV1Link(v1RecordId, ENV);
+        ledger.approveV1Link(v1RecordId, alice, ENV);
         g -= gasleft();
         console.log("approveV1Link over a 251-entry V1 trail: total gas / per entry", g, g / 251);
         assertEq(ledger.totalHours(alice), 6);

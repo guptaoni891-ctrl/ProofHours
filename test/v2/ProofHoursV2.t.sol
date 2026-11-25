@@ -443,7 +443,7 @@ contract ProofHoursLedgerTest is V2Fixture {
     function test_v1MigrationNeedsVolunteerConsentAndIssuerApproval() public {
         vm.prank(coord);
         vm.expectRevert(abi.encodeWithSelector(ProofHoursLedger.NoLinkRequest.selector, v1RecordId));
-        ledger.approveV1Link(v1RecordId, ENV);
+        ledger.approveV1Link(v1RecordId, alice, ENV);
         vm.prank(mallory); // not opted in
         vm.expectRevert(abi.encodeWithSelector(ProofHoursLedger.NotOptedIn.selector, mallory));
         ledger.requestV1Link(v1RecordId);
@@ -451,9 +451,9 @@ contract ProofHoursLedgerTest is V2Fixture {
         ledger.requestV1Link(v1RecordId);
         vm.prank(coord2); // a V2 coordinator, but not the V1 issuer
         vm.expectRevert(abi.encodeWithSelector(ProofHoursLedger.NotV1Issuer.selector, v1RecordId, coord2, coord));
-        ledger.approveV1Link(v1RecordId, ENV);
+        ledger.approveV1Link(v1RecordId, alice, ENV);
         vm.prank(coord);
-        uint256 id = ledger.approveV1Link(v1RecordId, ENV);
+        uint256 id = ledger.approveV1Link(v1RecordId, alice, ENV);
         assertEq(ledger.totalHours(alice), 4, "hours read from V1, not typed in");
         assertEq(ledger.getRecord(id).v1RecordId, v1RecordId);
         assertEq(uint8(ledger.getRecord(id).entryType), uint8(ProofHoursLedger.EntryType.MigratedV1));
@@ -463,7 +463,7 @@ contract ProofHoursLedgerTest is V2Fixture {
         vm.prank(alice);
         ledger.requestV1Link(v1RecordId);
         vm.prank(coord);
-        uint256 id = ledger.approveV1Link(v1RecordId, ENV);
+        uint256 id = ledger.approveV1Link(v1RecordId, alice, ENV);
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(ProofHoursLedger.AlreadyMigrated.selector, v1RecordId, id));
         ledger.requestV1Link(v1RecordId);
@@ -473,7 +473,7 @@ contract ProofHoursLedgerTest is V2Fixture {
         vm.prank(alice);
         ledger.requestV1Link(v1RecordId);
         vm.prank(coord);
-        uint256 id = ledger.approveV1Link(v1RecordId, ENV);
+        uint256 id = ledger.approveV1Link(v1RecordId, alice, ENV);
         vm.expectRevert(abi.encodeWithSelector(ProofHoursLedger.NothingToSync.selector, v1RecordId));
         ledger.syncV1(v1RecordId);
         vm.prank(coord);
@@ -497,7 +497,7 @@ contract ProofHoursLedgerTest is V2Fixture {
         vm.prank(alice);
         ledger.requestV1Link(v1RecordId);
         vm.prank(coord);
-        ledger.approveV1Link(v1RecordId, EDU);
+        ledger.approveV1Link(v1RecordId, alice, EDU);
         assertEq(ledger.categoryHours(alice)[1], 6);
     }
 
@@ -509,7 +509,7 @@ contract ProofHoursLedgerTest is V2Fixture {
         vm.prank(alice);
         ledger.requestV1Link(v1RecordId);
         vm.prank(coord);
-        ledger.approveV1Link(v1RecordId, ENV);
+        ledger.approveV1Link(v1RecordId, alice, ENV);
         assertEq(ledger.totalHours(alice), 6, "hours of the true head, not the 25th entry");
     }
 
@@ -520,7 +520,100 @@ contract ProofHoursLedgerTest is V2Fixture {
         ledger.requestV1Link(v1c);
         vm.prank(coord);
         vm.expectRevert(abi.encodeWithSelector(ProofHoursLedger.NotV1Original.selector, v1c));
-        ledger.approveV1Link(v1c, ENV);
+        ledger.approveV1Link(v1c, alice, ENV);
+    }
+
+    // ---------- security regressions (backend review) ----------
+
+    /// A front-running request from another wallet can neither redirect nor block the import the NGO approved.
+    function test_v1LinkCannotBeHijackedByFrontRunning() public {
+        vm.prank(alice);
+        ledger.requestV1Link(v1RecordId);
+        vm.prank(bob); // attacker requests the same record just before the NGO's approval lands
+        ledger.requestV1Link(v1RecordId);
+        vm.prank(coord);
+        ledger.approveV1Link(v1RecordId, alice, ENV);
+        assertEq(ledger.totalHours(alice), 4, "hours go to the wallet the NGO checked");
+        assertEq(ledger.totalHours(bob), 0, "the attacker gets nothing");
+    }
+
+    function test_v1ApproveNeedsTheNamedWalletsOwnRequest() public {
+        vm.prank(bob);
+        ledger.requestV1Link(v1RecordId);
+        vm.prank(coord);
+        vm.expectRevert(abi.encodeWithSelector(ProofHoursLedger.NoLinkRequest.selector, v1RecordId));
+        ledger.approveV1Link(v1RecordId, alice, ENV);
+    }
+
+    function test_v1ApproveRechecksConsent() public {
+        vm.prank(alice);
+        ledger.requestV1Link(v1RecordId);
+        vm.prank(alice);
+        ledger.optOut();
+        vm.prank(coord);
+        vm.expectRevert(abi.encodeWithSelector(ProofHoursLedger.NotOptedIn.selector, alice));
+        ledger.approveV1Link(v1RecordId, alice, ENV);
+    }
+
+    function test_v1RecordsCreatedAfterV2DeployCannotBeImported() public {
+        vm.warp(block.timestamp + 1);
+        vm.startPrank(coord);
+        uint256 e = v1.createEvent("EVT-NEW (demo)", 24);
+        uint256 fresh = v1.recordVolunteerHours(e, keccak256("fresh"), 24);
+        vm.stopPrank();
+        vm.prank(alice);
+        ledger.requestV1Link(fresh);
+        vm.prank(coord);
+        vm.expectRevert();
+        ledger.approveV1Link(fresh, alice, ENV);
+    }
+
+    function test_v1SyncIncreaseObeysPauseAndSuspensionButDecreaseDoesNot() public {
+        vm.prank(alice);
+        ledger.requestV1Link(v1RecordId);
+        vm.prank(coord);
+        ledger.approveV1Link(v1RecordId, alice, ENV);
+        vm.prank(coord);
+        uint256 up = v1.appendCorrection(v1RecordId, 6, "UP");
+        vm.prank(auditor);
+        ledger.suspendOrg(org1);
+        vm.expectRevert(abi.encodeWithSelector(ProofHoursLedger.OrgIsSuspended.selector, org1));
+        ledger.syncV1(v1RecordId);
+        vm.prank(gov);
+        ledger.reinstateOrg(org1);
+        vm.prank(auditor);
+        ledger.pause();
+        vm.expectRevert();
+        ledger.syncV1(v1RecordId);
+        vm.prank(coord);
+        v1.appendCorrection(up, 2, "DOWN");
+        ledger.syncV1(v1RecordId); // a decrease mirrors even while paused
+        assertEq(ledger.totalHours(alice), 2);
+    }
+
+    function test_eventsCannotBeDatedOutsideTheWindow() public {
+        uint32 maxBack = ledger.MAX_BACKDATE_DAYS();
+        vm.startPrank(coord);
+        vm.expectRevert(abi.encodeWithSelector(ProofHoursLedger.InvalidServiceDay.selector, uint32(0), today));
+        ledger.createEvent("epoch", ENV, 6, 0);
+        vm.expectRevert(abi.encodeWithSelector(ProofHoursLedger.InvalidServiceDay.selector, today - maxBack - 1, today));
+        ledger.createEvent("too old", ENV, 6, today - maxBack - 1);
+        ledger.createEvent("oldest allowed", ENV, 6, today - maxBack);
+        vm.expectRevert();
+        ledger.createEvent("too far ahead", ENV, 6, today + 367);
+        vm.stopPrank();
+    }
+
+    function test_correctionCannotRaiseHoursAfterOptOut() public {
+        uint256 r = _issue(_event(ENV, 6, today), alice, 2);
+        vm.prank(alice);
+        ledger.optOut();
+        vm.prank(coord);
+        vm.expectRevert(abi.encodeWithSelector(ProofHoursLedger.NotOptedIn.selector, alice));
+        ledger.correct(r, 5, "UP");
+        vm.prank(coord);
+        ledger.correct(r, 1, "DOWN"); // lowering is still allowed
+        assertEq(ledger.totalHours(alice), 1);
     }
 
     // ---------- fuzz ----------

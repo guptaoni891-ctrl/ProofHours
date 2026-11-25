@@ -389,7 +389,8 @@
                 <label class="field"><span>Longitude</span><input id="shLng" type="number" step="any" min="-180" max="180" placeholder="55.2708"></label>
                 <label class="field"><span>Radius (m)</span><input id="shRadius" type="number" min="20" max="5000" placeholder="200"></label>
               </div>
-              <small>The site of a public event, never a person's home. Volunteers who agree have their phone check whether they're inside this area; only "yes" or "no" is sent.</small>
+              <small>The site of a public event, never a person's home. Volunteers who agree send one location reading; the service checks it against this area and keeps only "at the site: yes or no", never the coordinates.</small>
+              <label class="consent-check"><input type="checkbox" id="shRequireSite"> <span>Require presence: check-in and check-out need a location reading inside the site area.</span></label>
             </fieldset>
             <button type="submit" class="btn btn-primary">Create shift</button>
             <div class="msg" role="alert"></div>
@@ -426,7 +427,7 @@
           <form id="ciForm" class="panel form-panel">
             <div class="panel-head"><h3 id="ciTitle">Scan a code</h3></div>
             <div id="ciShift" class="small muted">Open this page by scanning the QR code shown at your shift.</div>
-            <label class="consent-check" id="ciGeoRow" hidden><input type="checkbox" id="ciGeo"> <span>Check whether I'm at the site. Your phone compares its location with the site area; only "yes" or "no" is sent, never your coordinates.</span></label>
+            <label class="consent-check" id="ciGeoRow" hidden><input type="checkbox" id="ciGeo"> <span>Check whether I'm at the site. One location reading is sent; the service compares it with the site area and keeps only "yes" or "no", never your coordinates.</span></label>
             <button type="submit" id="ciBtn" class="btn btn-primary" hidden>Check in</button>
             <div class="msg" role="alert"></div>
           </form>
@@ -498,7 +499,8 @@
         <div class="grid-2">
           <form id="v1ApproveForm" class="panel form-panel">
             <div class="panel-head"><h3><span class="step">05</span>Approve a V1 link</h3></div>
-            <p class="small muted">Only the wallet that issued the V1 record can approve, after checking the student's receipt off-chain. Hours are copied from V1 at their current value.</p>
+            <p class="small muted">Only the wallet that issued the V1 record can approve, after checking the student's receipt off-chain. Hours are copied from V1 at their current value, to the wallet you name (someone else's request for the same record can't redirect them).</p>
+            <label class="field"><span>Volunteer wallet you checked</span><input id="v1ApproveWallet" required pattern="0x[0-9a-fA-F]{40}" placeholder="0x…" autocomplete="off" spellcheck="false"></label>
             <div class="field-row">
               <label class="field"><span>V1 record #</span><input id="v1ApproveId" type="number" min="1" required></label>
               <label class="field"><span>Impact area</span><select id="v1ApproveCat"><option value="0">Environmental</option><option value="1">Education</option><option value="2">Healthcare</option><option value="3">Emergency response</option><option value="4">Inclusion</option></select></label>

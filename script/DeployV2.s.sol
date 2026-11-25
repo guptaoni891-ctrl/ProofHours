@@ -18,7 +18,8 @@ import {ProofHoursBadges} from "../src/v2/ProofHoursBadges.sol";
 /// and pauser, then renounces its own roles. Do not set SEED_DEMO on a public network.
 ///
 /// Env: V1_ADDRESS (default: live V1), GOVERNANCE (default: deployer), SEED_DEMO (default false),
-///      SEED_COORDINATOR (default: the V1 Green Shores wallet, so V1 records can be linked on a fork).
+///      SEED_COORDINATOR (default: the V1 Green Shores wallet, so V1 records can be linked on a fork),
+///      AUDITOR (optional: granted AUDITOR_ROLE and PAUSER_ROLE, so the auditor can contain an incident alone).
 contract DeployV2 is Script {
     address constant LIVE_V1 = 0xFbDC02860EA7d34Cd563d8Bd4420C6F713e29F9b;
     address constant V1_GREEN_SHORES = 0x99f3a8E50c1d14AB62c2688f6f21635E32B10674;
@@ -29,11 +30,16 @@ contract DeployV2 is Script {
         address governance = vm.envOr("GOVERNANCE", deployer);
         bool seed = vm.envOr("SEED_DEMO", false);
         address seedCoordinator = vm.envOr("SEED_COORDINATOR", V1_GREEN_SHORES);
+        address auditor = vm.envOr("AUDITOR", address(0));
 
         vm.startBroadcast(deployer);
         badges = new ProofHoursBadges(deployer);
         ledger = new ProofHoursLedger(deployer, badges, v1);
         badges.grantRole(badges.MINTER_ROLE(), address(ledger));
+        if (auditor != address(0)) {
+            ledger.grantRole(ledger.AUDITOR_ROLE(), auditor);
+            ledger.grantRole(ledger.PAUSER_ROLE(), auditor);
+        }
 
         if (seed) {
             // fictional demo organisations; the deployer acts as their NGO admin on the local chain

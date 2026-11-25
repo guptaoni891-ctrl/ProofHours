@@ -10,7 +10,7 @@ const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 const { performance } = require("node:perf_hooks");
 const { ethers } = require("ethers");
-const { mac, safeEq, issue, verify } = require("./session");
+const { derive, mac, safeEq, sessionKeys, issue, verify } = require("./session");
 const { trustRoutes } = require("./trust");
 const { createOps } = require("./ops");
 
@@ -20,6 +20,9 @@ const NONCE_TTL = 300;
 const VOUCHER_DAYS = 7; // offline vouchers can be redeemed for a week after the shift
 const EARLY_CHECKIN = 30 * 60; // check-in opens 30 minutes before the shift
 const LATE_CHECKOUT = 2 * 3600; // check-out stays open 2 hours after the shift ends
+const MAX_LEAGUE = 5000; // league members; each costs chain reads once per snapshot
+const LEAGUE_TTL = 60; // seconds a league snapshot is reused
+const FAR = 1e13; // "still open" end time for overlap checks
 const MAX_BATCH = 25; // ~492k gas per volunteer when two badges mint (test/v2/ProofHoursV2.limits.t.sol): 25 fit the 16.7M per-transaction cap (EIP-7825)
 
 const LEDGER_ABI = [
@@ -27,6 +30,9 @@ const LEDGER_ABI = [
   "function optedIn(address) view returns (bool)",
   "function getOrg(uint256) view returns (tuple(string name, address admin, bool suspended, uint32 dailyIssueCap))",
   "function getEvent(uint256) view returns (tuple(uint256 orgId, uint8 category, uint16 maxHours, uint32 serviceDay, address createdBy, string code))",
+  "function hasRecord(uint256, address) view returns (bool)",
+  "function dayHours(address, uint32) view returns (uint256)",
+  "function orgDayIssued(uint256, uint32) view returns (uint256)",
   "function totalHours(address) view returns (uint256)",
   "function hasRole(bytes32, address) view returns (bool)",
   "function originalsOf(address, uint256, uint256) view returns (uint256[] ids, uint256 total)",
@@ -44,14 +50,13 @@ const ANIMAL = ["Heron", "Oryx", "Falcon", "Gazelle", "Turtle", "Dolphin", "Lynx
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const fail = (status, message) => { throw new HttpError(status, message); };
 const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
-const site = (v) => (v === true ? 1 : v === false ? 0 : null); // device-reported yes/no only
 const flag = (v) => (v === null || v === undefined ? null : v === 1);
 
 function openDb(file) {
   if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   db.exec(`
-    CREATE TABLE IF NOT EXISTS nonces (nonce TEXT PRIMARY KEY, exp INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS siwe_nonces (nonce TEXT PRIMARY KEY, address TEXT NOT NULL, message TEXT NOT NULL, exp INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS shifts (
       id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL, org_id INTEGER NOT NULL, start_at INTEGER NOT NULL, end_at INTEGER NOT NULL,
       capacity INTEGER NOT NULL, lat REAL, lng REAL, radius INTEGER, created_by TEXT NOT NULL, created_at INTEGER NOT NULL);
@@ -64,11 +69,13 @@ function openDb(file) {
     CREATE TABLE IF NOT EXISTS league (wallet TEXT PRIMARY KEY, alias TEXT NOT NULL, joined_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS vouchers (code TEXT PRIMARY KEY, shift_id INTEGER NOT NULL REFERENCES shifts(id), created_at INTEGER NOT NULL, redeemed_by TEXT, redeemed_at INTEGER);`);
   try { db.exec("ALTER TABLE attendance ADD COLUMN source TEXT NOT NULL DEFAULT 'qr'"); } catch { /* already there */ }
+  try { db.exec("ALTER TABLE shifts ADD COLUMN require_site INTEGER NOT NULL DEFAULT 0"); } catch { /* already there */ }
+  db.exec("DROP TABLE IF EXISTS nonces"); // pre-SIWE sign-in nonces (bound to neither a wallet nor a domain)
   return db;
 }
 
 // Read-only view of the V2 ledger and badges. Event lookups return null for unknown events.
-function ledgerChain(rpcUrl, ledger, chainId, badgesAddress) {
+function ledgerChain(rpcUrl, ledger, chainId, badgesAddress, confirmations = 1) {
   const provider = new ethers.JsonRpcProvider(rpcUrl, chainId, { staticNetwork: true });
   const c = new ethers.Contract(ledger, LEDGER_ABI, provider);
   const b = badgesAddress && new ethers.Contract(badgesAddress, ["function ownerOf(uint256) view returns (address)", "function badges(uint256) view returns (uint8 kind, uint16 threshold, uint64 issuedAt)"], provider);
@@ -85,13 +92,15 @@ function ledgerChain(rpcUrl, ledger, chainId, badgesAddress) {
     coordinatorOrg: async (a) => Number(await c.coordinatorOrg(a)),
     optedIn: (a) => c.optedIn(a),
     orgSuspended: async (id) => (await c.getOrg(id)).suspended,
+    org: async (id) => { const o = await c.getOrg(id); return { suspended: o.suspended, dailyIssueCap: Number(o.dailyIssueCap) }; },
+    // getEvent returns an all-zero struct for unknown ids (it never reverts): org 0 means "no such event"
     event: async (id) => {
-      try {
-        const e = await c.getFunction("getEvent")(id);
-        return { orgId: Number(e.orgId), maxHours: Number(e.maxHours), serviceDay: Number(e.serviceDay), code: e.code };
-      } catch (e) { if (e.code === "CALL_EXCEPTION") return null; throw e; }
+      const e = await c.getFunction("getEvent")(id);
+      return Number(e.orgId) === 0 ? null : { orgId: Number(e.orgId), category: Number(e.category), maxHours: Number(e.maxHours), serviceDay: Number(e.serviceDay), code: e.code };
     },
-    // shortcut: trusts a receipt with 1 confirmation; on a public chain wait for N confirmations (Stage 3 indexer)
+    hasRecord: (eventId, a) => c.hasRecord(eventId, a),
+    dayHours: async (a, day) => Number(await c.dayHours(a, day)),
+    orgDayIssued: async (orgId, day) => Number(await c.orgDayIssued(orgId, day)),
     totalHours: async (a) => Number(await c.totalHours(a)),
     // latest entry of every record the wallet holds (revoked = 0 hours); service day 0 = imported from V1
     // shortcut: first 500 records per wallet; page through originalsOf if anyone gets near that
@@ -99,9 +108,12 @@ function ledgerChain(rpcUrl, ledger, chainId, badgesAddress) {
       const [ids] = await c.originalsOf(a, 0, 500);
       return (await Promise.all(ids.map((id) => c.headOf(id)))).map((h) => ({ hours: Number(h.entryType) === 2 ? 0 : Number(h.hoursLogged), serviceDay: Number(h.serviceDay) }));
     },
+    // HoursIssued logs of a mined transaction, or { pending: n } while it has fewer than `confirmations` confirmations
     issued: async (hash) => {
       const r = await provider.getTransactionReceipt(hash);
       if (!r || r.status !== 1) return [];
+      const have = (await provider.getBlockNumber()) - r.blockNumber + 1;
+      if (have < confirmations) return { pending: confirmations - have };
       return r.logs.filter((l) => l.address.toLowerCase() === ledger.toLowerCase()).map((l) => c.interface.parseLog(l))
         .filter((e) => e?.name === "HoursIssued")
         .map((e) => ({ recordId: String(e.args.recordId), eventId: Number(e.args.eventId), volunteer: e.args.volunteer, evidenceHash: e.args.evidenceHash }));
@@ -109,8 +121,15 @@ function ledgerChain(rpcUrl, ledger, chainId, badgesAddress) {
   };
 }
 
-function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, chainId, publicUrl = "http://127.0.0.1:8790", now = () => Date.now(), rateLimit = Infinity, log = false }) {
-  const ops = createOps({ service: "attendance", limit: rateLimit, log, now });
+// Front-end origins allowed to ask for a sign-in message. Unset: local development origins only.
+const DEV_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
+
+function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, chainId, publicUrl = "http://127.0.0.1:8790", appOrigins = null, now = () => Date.now(), rateLimit = Infinity, log = false, trustProxy = false, metricsToken = null }) {
+  if (!secret) throw new Error("createApp needs a secret");
+  const ops = createOps({ service: "attendance", limit: rateLimit, log, now, trustProxy });
+  // one subkey per purpose, so no key is ever used for two things
+  const keys = { qr: derive(secret, "qr-hmac"), voucher: derive(secret, "voucher-hmac"), session: sessionKeys(secret) };
+  const sessionPub = crypto.createPublicKey(keys.session.privateKey);
   const t = () => Math.floor(now() / 1000);
   const q = (sql) => db.prepare(sql);
 
@@ -120,11 +139,18 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
     if (!Number.isInteger(n) || n < min || n > max) fail(400, `${name} must be a whole number from ${min} to ${max}.`);
     return n;
   };
-  const signInMessage = (a, nonce) =>
-    `ProofHours attendance sign-in\nWallet: ${a}\nChain: ${chainId}\nNonce: ${nonce}\n\nSigning proves you control this wallet. It is free and sends no transaction.`;
+  // EIP-4361 (Sign-In with Ethereum): the wallet shows the domain and warns when the page asking isn't that domain,
+  // so a look-alike site can't relay a real sign-in message to a victim.
+  const originOk = (o) => (appOrigins?.length ? appOrigins.includes(o) : DEV_ORIGIN.test(o));
+  const signInMessage = (origin, a, nonce, issued, exp) => [
+    `${new URL(origin).host} wants you to sign in with your Ethereum account:`, a, "",
+    "Sign in to ProofHours attendance. Signing is free and sends no transaction.", "",
+    `URI: ${origin}`, "Version: 1", `Chain ID: ${chainId}`, `Nonce: ${nonce}`,
+    `Issued At: ${new Date(issued * 1000).toISOString()}`, `Expiration Time: ${new Date(exp * 1000).toISOString()}`,
+  ].join("\n");
 
   function session(req) {
-    const v = verify(secret, req.headers.authorization, t());
+    const v = verify(sessionPub, req.headers.authorization, t());
     return v.address ?? fail(401, v.error);
   }
 
@@ -141,21 +167,38 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
 
   const shiftView = (s) => ({
     id: s.id, eventId: s.event_id, orgId: s.org_id, start: s.start_at, end: s.end_at, capacity: s.capacity,
-    site: s.lat === null ? null : { lat: s.lat, lng: s.lng, radius: s.radius },
+    site: s.lat === null ? null : { lat: s.lat, lng: s.lng, radius: s.radius }, requireSite: !!s.require_site,
     attending: s.attending ?? q("SELECT COUNT(*) AS n FROM attendance WHERE shift_id = ? AND status != 'rejected'").get(s.id).n,
   });
   // Hours inside the shift window, whole hours rounded down, capped by the event's maximum.
   const hoursOf = (a, s, maxHours) => Math.min(maxHours, Math.floor(Math.max(0, Math.min(a.out_at, s.end_at) - Math.max(a.in_at, s.start_at)) / 3600));
+  // Server-side site check: the device sends its position once; only the yes/no result is stored, never coordinates.
+  // A GPS reading can still be faked; requireSite makes faking necessary instead of optional.
+  const metres = (a, b) => {
+    const r = Math.PI / 180, h = Math.sin(((b.lat - a.lat) * r) / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(((b.lng - a.lng) * r) / 2) ** 2;
+    return 2 * 6371000 * Math.asin(Math.sqrt(h));
+  };
+  function located(s, loc) {
+    if (s.lat === null) return null;
+    let at = null;
+    if (loc != null) {
+      const p = { lat: Number(loc.lat), lng: Number(loc.lng) }, acc = Number(loc.accuracy ?? 0);
+      if (!(Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180 && acc >= 0)) fail(400, "The location reading is not valid.");
+      at = metres(p, s) - Math.min(acc, 100) <= s.radius ? 1 : 0; // up to 100 m of reported GPS uncertainty gets the benefit of the doubt
+    }
+    if (s.require_site && at !== 1) fail(403, at === 0 ? "You don't seem to be at the site. This shift needs a location reading inside the site area." : "This shift needs your location to confirm you're at the site. Allow location and try again.");
+    return at;
+  }
   const attendanceView = (a, preview) => ({
     id: a.id, shiftId: a.shift_id, eventId: a.event_id, volunteer: a.volunteer, checkIn: a.in_at, checkOut: a.out_at,
     atSiteIn: flag(a.in_site), atSiteOut: flag(a.out_site), status: a.status, hours: a.hours ?? preview ?? null, source: a.source ?? "qr",
     decidedBy: a.decided_by, reason: a.reason, evidence: a.evidence, evidenceHash: a.evidence_hash, recordId: a.record_id, txHash: a.tx_hash,
   });
 
-  const voucherMac = (shiftId, serial) => crypto.createHmac("sha256", secret).update(`voucher.${shiftId}.${serial}`).digest("hex").slice(0, 10).toUpperCase();
+  const voucherMac = (shiftId, serial) => crypto.createHmac("sha256", keys.voucher).update(`voucher.${shiftId}.${serial}`).digest("hex").slice(0, 10).toUpperCase();
   function readQr(token, kind) {
     const [sid, k, win, sig] = String(token ?? "").split(".");
-    if (!sig || !safeEq(sig, mac(secret, `qr.${sid}.${k}.${win}`))) fail(400, "This QR code is not valid.");
+    if (!sig || !safeEq(sig, mac(keys.qr, `qr.${sid}.${k}.${win}`))) fail(400, "This QR code is not valid.");
     if (k !== kind) fail(400, kind === "in" ? "This is a check-out code. Scan the check-in code." : "This is a check-in code. Scan the check-out code.");
     const cur = Math.floor(t() / QR_WINDOW);
     if (Number(win) > cur || Number(win) < cur - 1) fail(400, "This QR code expired. Scan the code on the coordinator's screen now.");
@@ -164,24 +207,29 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
 
   const routes = {
     "GET /health": () => ({ ok: !!q("SELECT 1 AS x").get().x }),
-    "GET /metrics": () => ops.metrics(),
 
     // Sign-in: the server issues a one-time nonce and the exact message; the wallet signs it (personal_sign).
-    "POST /auth/nonce": ({ body }) => {
-      const a = address(body.address), nonce = crypto.randomBytes(16).toString("hex");
-      q("DELETE FROM nonces WHERE exp < ?").run(t());
-      q("INSERT INTO nonces (nonce, exp) VALUES (?, ?)").run(nonce, t() + NONCE_TTL);
-      return { nonce, message: signInMessage(a, nonce) };
+    "GET /auth/public-key": () => ({ alg: "Ed25519", publicKey: keys.session.publicKey }), // SESSION_PUBLIC_KEY for the indexer
+    // The nonce is bound to the wallet and to the exact message, which names the front end's domain.
+    "POST /auth/nonce": ({ req, body }) => {
+      const a = address(body.address), origin = req.headers.origin;
+      if (origin !== undefined && !originOk(origin)) fail(403, "Sign-in is only available from the ProofHours app.");
+      const site = origin ?? appOrigins?.[0] ?? publicUrl, nonce = crypto.randomBytes(16).toString("hex"), now = t();
+      const message = signInMessage(site, a, nonce, now, now + NONCE_TTL);
+      q("DELETE FROM siwe_nonces WHERE exp < ?").run(now);
+      q("INSERT INTO siwe_nonces (nonce, address, message, exp) VALUES (?, ?, ?, ?)").run(nonce, a, message, now + NONCE_TTL);
+      return { nonce, message };
     },
     "POST /auth": ({ body }) => {
       const a = address(body.address);
-      if (!q("DELETE FROM nonces WHERE nonce = ? AND exp >= ? RETURNING nonce").get(String(body.nonce), t()))
-        fail(401, "This sign-in request expired or was already used. Try again.");
+      const n = q("DELETE FROM siwe_nonces WHERE nonce = ? AND exp >= ? RETURNING address, message").get(String(body.nonce ?? ""), t());
+      if (!n) fail(401, "This sign-in request expired or was already used. Try again.");
+      if (n.address !== a) fail(401, "This sign-in request was made for another wallet.");
       let signer;
-      try { signer = ethers.verifyMessage(signInMessage(a, body.nonce), String(body.signature)); } catch { fail(401, "The signature is not valid."); }
+      try { signer = ethers.verifyMessage(n.message, String(body.signature)); } catch { fail(401, "The signature is not valid."); }
       if (signer !== a) fail(401, "The signature does not match this wallet.");
       const exp = t() + SESSION_TTL;
-      return { token: issue(secret, a, exp), address: a, expiresAt: exp };
+      return { token: issue(keys.session.privateKey, a, exp), address: a, expiresAt: exp };
     },
 
     "POST /shifts": async ({ req, body }) => {
@@ -198,8 +246,9 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
         if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) fail(400, "The site location is not valid.");
         radius = int(body.site.radius, "Site radius (metres)", 20, 5000);
       }
-      const { lastInsertRowid } = q("INSERT INTO shifts (event_id, org_id, start_at, end_at, capacity, lat, lng, radius, created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
-        .run(eventId, org, start, end, capacity, lat, lng, radius, me, t());
+      if (body.requireSite && lat === null) fail(400, "Requiring presence at the site needs a site area.");
+      const { lastInsertRowid } = q("INSERT INTO shifts (event_id, org_id, start_at, end_at, capacity, lat, lng, radius, created_by, created_at, require_site) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+        .run(eventId, org, start, end, capacity, lat, lng, radius, me, t(), body.requireSite === true ? 1 : 0);
       return shiftView(shiftById(Number(lastInsertRowid)));
     },
     "GET /shifts": async ({ req }) => {
@@ -214,7 +263,7 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
       const s = shiftById(id);
       await coordinatorFor(session(req), s.org_id);
       const kind = url.searchParams.get("kind") === "out" ? "out" : "in", win = Math.floor(t() / QR_WINDOW);
-      return { token: `${s.id}.${kind}.${win}.${mac(secret, `qr.${s.id}.${kind}.${win}`)}`, kind, now: t(), rotatesAt: (win + 1) * QR_WINDOW, expiresAt: (win + 2) * QR_WINDOW };
+      return { token: `${s.id}.${kind}.${win}.${mac(keys.qr, `qr.${s.id}.${kind}.${win}`)}`, kind, now: t(), rotatesAt: (win + 1) * QR_WINDOW, expiresAt: (win + 2) * QR_WINDOW };
     },
 
     // Replay protection: a QR code is only valid ~30-60 s, and each wallet can check in and out of a shift once.
@@ -228,11 +277,14 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
       if (q("SELECT 1 FROM attendance WHERE shift_id = ? AND volunteer = ?").get(s.id, me)) fail(409, "You already checked in to this shift.");
       const open = q("SELECT shift_id FROM attendance WHERE volunteer = ? AND status = 'checked_in'").get(me);
       if (open) fail(409, `You are still checked in to shift #${open.shift_id}. Check out there first: attendance can't overlap.`);
+      // closed attendance (e.g. a redeemed voucher) that still covers any of this shift from now on
+      const clash = q("SELECT shift_id FROM attendance WHERE volunteer = ? AND status != 'rejected' AND in_at < ? AND COALESCE(out_at, ?) > ?").get(me, s.end_at, FAR, now);
+      if (clash) fail(409, `This shift overlaps attendance you already have (shift #${clash.shift_id}).`);
       const same = q("SELECT shift_id FROM attendance WHERE volunteer = ? AND event_id = ? AND status != 'rejected'").get(me, s.event_id);
       if (same) fail(409, `You already have attendance for this event (shift #${same.shift_id}). The ledger holds one record per volunteer per event.`);
       if (q("SELECT COUNT(*) AS n FROM attendance WHERE shift_id = ? AND status != 'rejected'").get(s.id).n >= s.capacity) fail(409, "This shift is full.");
       const { lastInsertRowid } = q("INSERT INTO attendance (shift_id, event_id, volunteer, in_at, in_site, status) VALUES (?,?,?,?,?, 'checked_in')")
-        .run(s.id, s.event_id, me, now, site(body.atSite));
+        .run(s.id, s.event_id, me, now, located(s, body.location));
       return attendanceView(attendanceById(Number(lastInsertRowid)));
     },
     "POST /checkout": ({ req, body }) => {
@@ -241,7 +293,7 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
       if (!a) fail(409, "You have not checked in to this shift.");
       if (a.status !== "checked_in") fail(409, "You already checked out of this shift.");
       if (now > s.end_at + LATE_CHECKOUT) fail(400, "Check-out closed 2 hours after the shift ended. Ask the coordinator.");
-      q("UPDATE attendance SET out_at = ?, out_site = ?, status = 'checked_out' WHERE id = ?").run(now, site(body.atSite), a.id);
+      q("UPDATE attendance SET out_at = ?, out_site = ?, status = 'checked_out' WHERE id = ?").run(now, located(s, body.location), a.id);
       return attendanceView(attendanceById(a.id), hoursOf({ ...a, out_at: now }, s, 24));
     },
     // ---------- Leagues (opt-in). Members are shown by a generated alias, never by wallet, and only the 3 above and
@@ -249,12 +301,16 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
     "POST /league/join": async ({ req }) => {
       const me = session(req);
       if (!(await chain.optedIn(me))) fail(403, "Opt in on your passport first: leagues rank verified hours only.");
+      const member = q("SELECT 1 FROM league WHERE wallet = ?").get(me);
+      // a verified hour from an NGO is the entry ticket, so throwaway wallets can't flood the league
+      if (!member && (await chain.totalHours(me)) < 1) fail(403, "Leagues open after your first verified hour from an NGO.");
+      if (!member && q("SELECT COUNT(*) AS n FROM league").get().n >= MAX_LEAGUE) fail(503, "The league is full this season.");
       const alias = `${ADJ[crypto.randomInt(ADJ.length)]} ${ANIMAL[crypto.randomInt(ANIMAL.length)]} ${crypto.randomInt(10, 100)}`;
-      q("INSERT OR IGNORE INTO league (wallet, alias, joined_at) VALUES (?, ?, ?)").run(me, alias, t());
+      if (q("INSERT OR IGNORE INTO league (wallet, alias, joined_at) VALUES (?, ?, ?)").run(me, alias, t()).changes) leagueSnap = null;
       return league(me);
     },
     "POST /league/leave": ({ req }) => {
-      q("DELETE FROM league WHERE wallet = ?").run(session(req)); // removed from every ranking immediately
+      if (q("DELETE FROM league WHERE wallet = ?").run(session(req)).changes) leagueSnap = null; // removed from every ranking immediately
       return { joined: false };
     },
     "GET /league/me": ({ req }) => league(session(req)),
@@ -281,12 +337,13 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
       const v = q("SELECT * FROM vouchers WHERE code = ?").get(canonical) ?? fail(404, "This voucher was not issued.");
       if (v.redeemed_by) fail(409, "This voucher has already been used.");
       const s = shiftById(v.shift_id), now = t();
-      if (now < s.end_at - EARLY_CHECKIN) fail(400, "Vouchers can be redeemed from the end of the shift.");
+      if (now < s.end_at - EARLY_CHECKIN) fail(400, "Vouchers can be redeemed from 30 minutes before the shift ends.");
       if (now > s.end_at + VOUCHER_DAYS * 86400) fail(400, `This voucher expired ${VOUCHER_DAYS} days after the shift.`);
       if (q("SELECT 1 FROM attendance WHERE shift_id = ? AND volunteer = ?").get(s.id, me)) fail(409, "You already have attendance for this shift.");
       const same = q("SELECT shift_id FROM attendance WHERE volunteer = ? AND event_id = ? AND status != 'rejected'").get(me, s.event_id);
       if (same) fail(409, `You already have attendance for this event (shift #${same.shift_id}). The ledger holds one record per volunteer per event.`);
-      const overlap = q("SELECT shift_id FROM attendance WHERE volunteer = ? AND status != 'rejected' AND in_at < ? AND COALESCE(out_at, in_at) > ?").get(me, s.end_at, s.start_at);
+      // an open check-in counts as running until it is closed
+      const overlap = q("SELECT shift_id FROM attendance WHERE volunteer = ? AND status != 'rejected' AND in_at < ? AND COALESCE(out_at, ?) > ?").get(me, s.end_at, FAR, s.start_at);
       if (overlap) fail(409, `This shift overlaps attendance you already have (shift #${overlap.shift_id}).`);
       if (q("SELECT COUNT(*) AS n FROM attendance WHERE shift_id = ? AND status != 'rejected'").get(s.id).n >= s.capacity) fail(409, "This shift is full.");
       if (q("UPDATE vouchers SET redeemed_by = ?, redeemed_at = ? WHERE code = ? AND redeemed_by IS NULL").run(me, now, canonical).changes !== 1) fail(409, "This voucher has already been used.");
@@ -299,14 +356,16 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
       q("SELECT * FROM attendance WHERE volunteer = ? ORDER BY in_at DESC").all(session(req)).map((a) => attendanceView(a)),
 
     "GET /shifts/:id/attendance": async ({ req, id }) => {
-      const s = shiftById(id), ev = await event(s.event_id);
-      await coordinatorFor(session(req), s.org_id);
+      const s = shiftById(id);
+      await coordinatorFor(session(req), s.org_id); // authorise before any further chain reads
+      const ev = await event(s.event_id);
       return q("SELECT * FROM attendance WHERE shift_id = ? ORDER BY in_at").all(id)
         .map((a) => attendanceView(a, a.status === "checked_out" ? hoursOf(a, s, ev.maxHours) : undefined));
     },
     "POST /attendance/:id/approve": async ({ req, id }) => {
-      const me = session(req), s = shiftById(attendanceById(id).shift_id), ev = await event(s.event_id);
+      const me = session(req), s = shiftById(attendanceById(id).shift_id);
       await coordinatorFor(me, s.org_id);
+      const ev = await event(s.event_id);
       const a = attendanceById(id); // re-read after the awaits
       if (a.status !== "checked_out") fail(409, a.status === "checked_in" ? "The volunteer has not checked out yet." : `This attendance is already ${a.status}.`);
       const hours = hoursOf(a, s, ev.maxHours);
@@ -327,17 +386,33 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
       const reason = String(body.reason ?? "").trim().slice(0, 100);
       if (!reason) fail(400, "Give a reason for the rejection.");
       const a = attendanceById(id);
-      if (!["checked_in", "checked_out"].includes(a.status)) fail(409, `This attendance is already ${a.status}.`);
+      // approved rows can still be rejected until they are issued, so one bad row can't block a shift's batch forever
+      if (!["checked_in", "checked_out", "approved"].includes(a.status)) fail(409, `This attendance is already ${a.status}.`);
       q("UPDATE attendance SET status = 'rejected', decided_by = ?, decided_at = ?, reason = ? WHERE id = ?").run(me, t(), reason, id);
       return attendanceView(attendanceById(id));
     },
 
     // What the coordinator's wallet should send: issueBatch(eventId, volunteers, hours, evidence).
+    // issueBatch is all-or-nothing, so every line is checked against the chain first; lines that would revert are
+    // reported in `blocked` (with the reason) instead of being sent.
     "GET /shifts/:id/issuable": async ({ req, id }) => {
-      const s = shiftById(id);
-      await coordinatorFor(session(req), s.org_id);
-      const all = q("SELECT * FROM attendance WHERE shift_id = ? AND status = 'approved' ORDER BY id").all(id), rows = all.slice(0, MAX_BATCH);
-      return { eventId: s.event_id, attendanceIds: rows.map((r) => r.id), volunteers: rows.map((r) => r.volunteer), hours: rows.map((r) => r.hours), evidence: rows.map((r) => r.evidence_hash), remaining: all.length - rows.length };
+      const s = shiftById(id), org = await coordinatorFor(session(req), s.org_id), ev = await event(s.event_id), today = Math.floor(t() / 86400);
+      const all = q("SELECT * FROM attendance WHERE shift_id = ? AND status = 'approved' ORDER BY id").all(id), rows = [], blocked = [];
+      if (ev.serviceDay > today) return { eventId: s.event_id, attendanceIds: [], volunteers: [], hours: [], evidence: [], remaining: all.length, blocked: [], notBefore: ev.serviceDay * 86400 };
+      const cap = ev.category === 3 ? 24 : 12; // ProofHoursLedger DAILY_CAP / EMERGENCY_DAILY_CAP
+      const [o, issuedToday] = await Promise.all([chain.org(org), chain.orgDayIssued(org, today)]);
+      let orgLeft = o.dailyIssueCap - issuedToday, i = 0;
+      for (; i < all.length && rows.length < MAX_BATCH; i++) {
+        const r = all[i], [opted, has, day] = await Promise.all([chain.optedIn(r.volunteer), chain.hasRecord(s.event_id, r.volunteer), chain.dayHours(r.volunteer, ev.serviceDay)]);
+        const reason = !opted ? "The volunteer opted out, so the ledger refuses new hours for this wallet. Reject this attendance."
+          : has ? "The volunteer already has a ledger record for this event. Reject this attendance."
+          : day + r.hours > cap ? `This would take the volunteer past ${cap}h on the service day (${day}h already recorded). Reject it, or correct the other record first.`
+          : r.hours > orgLeft ? "Your NGO's daily issuance cap is used up. Issue this one tomorrow." : null;
+        if (reason) { blocked.push({ attendanceId: r.id, volunteer: r.volunteer, hours: r.hours, reason }); continue; }
+        orgLeft -= r.hours;
+        rows.push(r);
+      }
+      return { eventId: s.event_id, attendanceIds: rows.map((r) => r.id), volunteers: rows.map((r) => r.volunteer), hours: rows.map((r) => r.hours), evidence: rows.map((r) => r.evidence_hash), remaining: all.length - i, blocked };
     },
     // Marks attendance as issued only when the chain shows a matching HoursIssued log (event, wallet and evidence hash).
     "POST /shifts/:id/issued": async ({ req, id, body }) => {
@@ -345,6 +420,7 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
       await coordinatorFor(session(req), s.org_id);
       if (!ethers.isHexString(body.txHash, 32)) fail(400, "Not a transaction hash.");
       const logs = await chain.issued(body.txHash);
+      if (logs.pending) fail(409, `The transaction needs ${logs.pending} more confirmation(s) before attendance is marked issued. Try again shortly.`);
       let marked = 0;
       for (const a of q("SELECT * FROM attendance WHERE shift_id = ? AND status = 'approved'").all(id)) {
         const log = logs.find((l) => l.eventId === s.event_id && l.volunteer === a.volunteer && l.evidenceHash === a.evidence_hash);
@@ -357,26 +433,33 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
   };
 
   // Cohorts of up to 30, formed within experience bands (lifetime verified hours) so newcomers meet newcomers.
-  // Members' chain reads are cached for 60 s, so league requests don't each fan out to the RPC (fresh wallets can join for free).
-  // shortcut: one chain read per member per minute; index records past a few thousand members
-  const memberCache = new Map();
-  const memberChain = (w) => {
-    const c = memberCache.get(w);
-    if (c && t() - c.at < 60) return c.data;
-    const data = Promise.all([chain.totalHours(w), chain.records(w)]);
-    memberCache.set(w, { at: t(), data });
-    data.catch(() => memberCache.delete(w)); // never cache a failed read
+  // The whole league is one snapshot, rebuilt at most once per LEAGUE_TTL (and on join/leave) however many requests
+  // arrive; concurrent requests share the rebuild in flight, and chain reads run at most 8 at a time.
+  let leagueSnap = null;
+  async function pool(items, n, fn) {
+    const out = new Array(items.length);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i]); } }));
+    return out;
+  }
+  function snapshot() {
+    if (leagueSnap && t() - leagueSnap.at < LEAGUE_TTL) return leagueSnap.data;
+    const today = Math.floor(t() / 86400), d = new Date(t() * 1000);
+    const start = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 86400000), end = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / 86400000) - 1;
+    const data = pool(q("SELECT * FROM league ORDER BY joined_at, wallet").all(), 8, async (m) => {
+      const [life, recs] = await Promise.all([chain.totalHours(m.wallet), chain.records(m.wallet)]);
+      return { ...m, band: BANDS.findIndex((b) => life < b), hours: recs.filter((r) => r.serviceDay >= start && r.serviceDay <= today).reduce((a, r) => a + r.hours, 0) };
+    }).then((members) => ({ start, end, members }));
+    const snap = { at: t(), data };
+    leagueSnap = snap;
+    data.catch(() => { if (leagueSnap === snap) leagueSnap = null; }); // never keep a failed read
     return data;
-  };
+  }
   async function league(me) {
     const mine = q("SELECT * FROM league WHERE wallet = ?").get(me);
     if (!mine) return { joined: false };
-    const today = Math.floor(t() / 86400), d = new Date(t() * 1000);
-    const start = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 86400000), end = Math.floor(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / 86400000) - 1;
-    const members = await Promise.all(q("SELECT * FROM league ORDER BY joined_at, wallet").all().map(async (m) => {
-      const [life, recs] = await memberChain(m.wallet);
-      return { ...m, band: BANDS.findIndex((b) => life < b), hours: recs.filter((r) => r.serviceDay >= start && r.serviceDay <= today).reduce((a, r) => a + r.hours, 0) };
-    }));
+    let { start, end, members } = await snapshot();
+    if (!members.some((m) => m.wallet === me)) { leagueSnap = null; ({ start, end, members } = await snapshot()); } // joined after the snapshot
     const band = members.find((m) => m.wallet === me).band, inBand = members.filter((m) => m.band === band);
     const idx = inBand.findIndex((m) => m.wallet === me), cohort = inBand.slice(Math.floor(idx / 30) * 30, Math.floor(idx / 30) * 30 + 30);
     cohort.sort((a, b) => b.hours - a.hours || a.joined_at - b.joined_at);
@@ -389,6 +472,7 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
   }
 
   Object.assign(routes, trustRoutes({ db, keysDb, chain, secret, chainId, publicUrl, t, session, fail, q }));
+  routes["GET /metrics"] = ({ req }) => (ops.metricsAllowed(req, metricsToken) ? ops.metrics() : fail(404, "Not found."));
   const table = Object.entries(routes).map(([k, fn]) => {
     const [method, pattern] = k.split(" ");
     return { method, re: new RegExp(`^${pattern.replace(":id", "(\\d+)").replace(":addr", "(0x[0-9a-fA-F]{40})")}$`), fn };
@@ -398,7 +482,12 @@ function createApp({ db, keysDb = new DatabaseSync(":memory:"), chain, secret, c
     return new Promise((resolve, reject) => {
       let size = 0, data = "";
       req.on("data", (c) => { size += c.length; if (size > 16384) { reject(new HttpError(413, "Request too large.")); req.destroy(); } else data += c; });
-      req.on("end", () => { try { resolve(data ? JSON.parse(data) : {}); } catch { reject(new HttpError(400, "Body must be JSON.")); } });
+      req.on("end", () => {
+        let v;
+        try { v = data ? JSON.parse(data) : {}; } catch { return reject(new HttpError(400, "Body must be JSON.")); }
+        if (v === null || typeof v !== "object" || Array.isArray(v)) return reject(new HttpError(400, "Body must be a JSON object."));
+        resolve(v);
+      });
       req.on("error", reject);
     });
   }
@@ -448,8 +537,13 @@ if (require.main === module) {
   const keysDb = new DatabaseSync(keysFile);
   const port = Number(env.PORT || 8790);
   const badges = env.BADGES || "0x64d4972B737C1ECfab6FEdE9AD201D28660a35F4"; // local deterministic V2 badges (docs/config.js)
-  http.createServer(createApp({ db, keysDb, chain: ledgerChain(rpc, ledger, chainId, badges), secret, chainId, publicUrl: env.PUBLIC_URL || `http://127.0.0.1:${port}`, rateLimit: Number(env.RATE_LIMIT || 300), log: env.LOG_REQUESTS !== "0" }))
-    .listen(port, "127.0.0.1", () => console.log(`Attendance service on http://127.0.0.1:${port} (ledger ${ledger} via ${rpc})`));
+  const local = chainId === 31337;
+  const appOrigins = env.APP_ORIGINS ? env.APP_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean) : null;
+  if (!local && !appOrigins) { console.error("APP_ORIGINS must list the front end's origin(s) on a public network (Sign-In with Ethereum domain binding)."); process.exit(1); }
+  const confirmations = Number(env.CONFIRMATIONS || (local ? 1 : 3));
+  http.createServer(createApp({ db, keysDb, chain: ledgerChain(rpc, ledger, chainId, badges, confirmations), secret, chainId, publicUrl: env.PUBLIC_URL || `http://127.0.0.1:${port}`, appOrigins,
+    rateLimit: Number(env.RATE_LIMIT || 300), log: env.LOG_REQUESTS !== "0", trustProxy: env.TRUST_PROXY === "1", metricsToken: env.METRICS_TOKEN || null }))
+    .listen(port, "127.0.0.1", () => console.log(`Attendance service on http://127.0.0.1:${port} (ledger ${ledger} via ${rpc})\nSESSION_PUBLIC_KEY for the indexer: ${sessionKeys(secret).publicKey}`));
 }
 
 module.exports = { createApp, openDb, ledgerChain, QR_WINDOW };

@@ -331,7 +331,7 @@
   };
   $("v2CorrectForm").onsubmit = (e) => { e.preventDefault(); send(e.target, "correct", () => [$("v2FixId").value, $("v2FixHours").value, bytes32($("v2FixReason").value.trim())], ledgerTarget).then(after(loadIssuance)); };
   $("v2RevokeForm").onsubmit = (e) => { e.preventDefault(); send(e.target, "revoke", () => [$("v2RevId").value, bytes32($("v2RevReason").value.trim())], ledgerTarget).then(after(loadIssuance)); };
-  $("v1ApproveForm").onsubmit = (e) => { e.preventDefault(); send(e.target, "approveV1Link", () => [$("v1ApproveId").value, Number($("v1ApproveCat").value)], ledgerTarget).then(after(loadIssuance)); };
+  $("v1ApproveForm").onsubmit = (e) => { e.preventDefault(); send(e.target, "approveV1Link", () => [$("v1ApproveId").value, ethers.getAddress($("v1ApproveWallet").value.trim()), Number($("v1ApproveCat").value)], ledgerTarget).then(after(loadIssuance)); };
   $("v1SyncForm").onsubmit = (e) => { e.preventDefault(); send(e.target, "syncV1", () => [$("v1SyncId").value], ledgerTarget).then(after(loadIssuance)); };
 
   // ---------- Attendance (off-chain service: shifts, rotating QR, approvals) ----------
@@ -463,7 +463,7 @@
     $("attList").innerHTML = rows.length ? rows.map((a) => {
       const [cls, label] = STATUS[a.status];
       const approve = a.status === "checked_out" ? `<button type="button" class="btn btn-primary sm" data-approve="${a.id}">Approve</button>` : "";
-      const reject = ["checked_in", "checked_out"].includes(a.status) ? `<button type="button" class="btn btn-ghost sm" data-reject="${a.id}">Reject</button>` : "";
+      const reject = ["checked_in", "checked_out", "approved"].includes(a.status) ? `<button type="button" class="btn btn-ghost sm" data-reject="${a.id}">Reject</button>` : "";
       return `<tr data-att="${a.id}"><td>${addrHtml(a.volunteer)}</td><td class="mono">${fmtT(a.checkIn)}</td><td class="mono">${fmtT(a.checkOut)}</td>
         <td>${siteText(a.atSiteIn)} / ${siteText(a.atSiteOut)}</td><td>${a.hours == null ? "—" : a.hours + "h"}</td>
         <td><span class="badge ${cls}">${label}</span>${a.source === "voucher" ? ' <span class="badge neutral">offline voucher</span>' : ""}${a.recordId ? ` <span class="small">record #${a.recordId}</span>` : ""}${a.reason ? ` <span class="small">${esc(a.reason)}</span>` : ""}</td>
@@ -478,7 +478,7 @@
       const start = Math.floor(new Date($("shStart").value).getTime() / 1000), end = Math.floor(new Date($("shEnd").value).getTime() / 1000);
       const lat = $("shLat").value, lng = $("shLng").value, radius = $("shRadius").value;
       if ([lat, lng, radius].some(Boolean) && ![lat, lng, radius].every(Boolean)) throw new Error("For a site area, fill in latitude, longitude and radius, or leave all three empty.");
-      const s = await api("/shifts", { method: "POST", body: { eventId: Number($("shEvent").value), start, end, capacity: Number($("shCap").value), site: lat ? { lat: Number(lat), lng: Number(lng), radius: Number(radius) } : null } });
+      const s = await api("/shifts", { method: "POST", body: { eventId: Number($("shEvent").value), start, end, capacity: Number($("shCap").value), site: lat ? { lat: Number(lat), lng: Number(lng), radius: Number(radius) } : null, requireSite: $("shRequireSite").checked } });
       await loadShifts();
       return s;
     }, (s) => `<strong>Shift #${s.id} created.</strong> Show its check-in QR when volunteers arrive.`);
@@ -520,11 +520,17 @@
     msg.textContent = "Checking what's approved…";
     let iss;
     try { iss = await api(`/shifts/${current.id}/issuable`); } catch (err) { return stop(declined(err)); }
-    if (!iss.volunteers.length) return stop("Nothing approved to issue for this shift. Approve attendance first.");
+    const held = (iss.blocked ?? []).map((x) => `${short(x.volunteer)}: ${x.reason}`).join(" ");
+    if (!iss.volunteers.length) return stop(held ? `Nothing can be issued right now. ${held}` : "Nothing approved to issue for this shift. Approve attendance first.");
     const receipt = await send(form, "issueBatch", () => [iss.eventId, iss.volunteers, iss.hours, iss.evidence], ledgerTarget);
     if (!receipt) return;
     try {
-      const { marked } = await api(`/shifts/${current.id}/issued`, { method: "POST", body: { txHash: receipt.hash } });
+      let marked;
+      for (let tries = 0; ; tries++) { // the service waits for confirmations before trusting the receipt
+        try { ({ marked } = await api(`/shifts/${current.id}/issued`, { method: "POST", body: { txHash: receipt.hash } })); break; }
+        catch (err) { if (!/confirmation/.test(err.message) || tries >= 20) throw err; await new Promise((r) => setTimeout(r, 3000)); }
+      }
+      if (held) msg.insertAdjacentHTML("beforeend", `<br><strong>Held back:</strong> ${esc(held)}`);
       msg.insertAdjacentHTML("beforeend", `<br>The attendance service checked the receipt and marked ${marked} attendance record${marked === 1 ? "" : "s"} as issued.${iss.remaining ? ` <strong>${iss.remaining} more approved:</strong> issue again for the next batch (at most 25 per transaction).` : ""}`);
     } catch (err) { msg.insertAdjacentHTML("beforeend", `<br>${esc("Issued on-chain, but the attendance service could not be updated: " + err.message)}`); }
     loadReview(current).catch(() => {});
@@ -572,17 +578,14 @@
         btn.textContent = kind === "in" ? "Check in" : "Check out";
         btn.hidden = false;
         $("ciGeoRow").hidden = !ciShift.site;
+        if (ciShift.requireSite) { $("ciGeo").checked = true; $("ciGeo").disabled = true; } else $("ciGeo").disabled = false; // this shift requires presence
       } catch (err) { $("ciShift").textContent = friendly(err); }
     }
     if (await signedIn()) await loadMine();
   }
-  const metres = (a, b) => {
-    const r = Math.PI / 180, h = Math.sin(((b.lat - a.lat) * r) / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(((b.lng - a.lng) * r) / 2) ** 2;
-    return 2 * 6371000 * Math.asin(Math.sqrt(h));
-  };
-  // The position is compared on this device and discarded; only the yes/no answer leaves it.
+  // One reading goes to the service, which compares it with the site area and stores only the yes/no answer.
   const atSite = () => new Promise((resolve, reject) => navigator.geolocation
-    ? navigator.geolocation.getCurrentPosition((p) => resolve(metres({ lat: p.coords.latitude, lng: p.coords.longitude }, ciShift.site) <= ciShift.site.radius),
+    ? navigator.geolocation.getCurrentPosition((p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy }),
       () => reject(new Error("Location was not available or not allowed. Untick the location box to continue without it.")), { timeout: 15000, maximumAge: 60000 })
     : reject(new Error("This browser has no location support. Untick the location box to continue without it.")));
   async function loadMine() {
@@ -598,8 +601,8 @@
     e.preventDefault();
     const kind = ciToken?.split(".")[1];
     act(e.target, async () => {
-      const site = ciShift?.site && $("ciGeo").checked ? await atSite() : null;
-      const a = await api(kind === "in" ? "/checkin" : "/checkout", { method: "POST", body: { token: ciToken, atSite: site } });
+      const location = ciShift?.site && $("ciGeo").checked ? await atSite() : null;
+      const a = await api(kind === "in" ? "/checkin" : "/checkout", { method: "POST", body: { token: ciToken, location } });
       ciToken = null; // the next step needs the next code
       history.replaceState(null, "", location.pathname + location.search);
       $("ciBtn").hidden = true;

@@ -29,7 +29,8 @@ interface IVolunteerHoursV1 {
 /// @notice Permissions (see docs/V2_SECURITY_MODEL.md):
 ///  - Governance (DEFAULT_ADMIN_ROLE, intended to be a multisig) registers NGOs and their admins, sets caps,
 ///    reinstates suspended NGOs, unpauses, and can revoke records after a dispute.
-///  - AUDITOR_ROLE can suspend an NGO and pause issuance (fast containment), never issue or reinstate.
+///  - AUDITOR_ROLE can suspend an NGO (fast containment), never issue or reinstate. Pausing needs PAUSER_ROLE,
+///    which governance holds and may also grant to auditors (DeployV2's AUDITOR env does both).
 ///  - An NGO admin assigns coordinator wallets for its own NGO only. Coordinators hold no AccessControl
 ///    role, so they cannot grant themselves admin, auditor or governance powers.
 ///  - Coordinators issue, correct and revoke hours only for their own NGO's events.
@@ -42,6 +43,8 @@ contract ProofHoursLedger is AccessControl, Pausable {
     uint16 public constant EMERGENCY_DAILY_CAP = 24; // emergency-response override
     uint8 public constant CATEGORY_COUNT = 5;
     bytes32 public constant V1_SYNC_REASON = "V1_SYNC";
+    uint32 public constant MAX_BACKDATE_DAYS = 90; // events can't be dated further back (bounds daily-cap farming)
+    uint32 public constant MAX_SCHEDULE_DAYS = 366; // ...or more than a year ahead
 
     enum Category {
         Environmental,
@@ -93,6 +96,7 @@ contract ProofHoursLedger is AccessControl, Pausable {
 
     ProofHoursBadges public immutable badges;
     IVolunteerHoursV1 public immutable v1;
+    uint64 public immutable v1Cutoff; // only V1 originals recorded before V2 was deployed can be imported
 
     uint256 public orgCount;
     uint256 public eventCount;
@@ -108,7 +112,8 @@ contract ProofHoursLedger is AccessControl, Pausable {
     mapping(address => mapping(uint32 day => uint256)) public dayHours;
     mapping(uint256 orgId => mapping(uint32 day => uint256)) public orgDayIssued;
     mapping(address => uint256[]) internal _originals;
-    mapping(uint256 v1Id => address volunteer) public v1LinkRequest;
+    // One request per (record, wallet): a stranger's request can't overwrite or hijack the real volunteer's.
+    mapping(uint256 v1Id => mapping(address volunteer => bool)) public v1LinkRequested;
     mapping(uint256 v1Id => uint256 v2RecordId) public v1Migrated;
 
     error NotOrgAdmin(uint256 orgId, address caller);
@@ -138,6 +143,8 @@ contract ProofHoursLedger is AccessControl, Pausable {
     error NotMigrated(uint256 v1Id);
     error NothingToSync(uint256 v1Id);
     error V1NotConfigured();
+    error InvalidServiceDay(uint32 serviceDay, uint32 today);
+    error V1RecordTooNew(uint256 v1Id, uint64 recordedAt, uint64 cutoff);
 
     event OrgRegistered(uint256 indexed orgId, string name, address indexed admin, uint32 dailyIssueCap);
     event OrgAdminChanged(uint256 indexed orgId, address indexed admin);
@@ -160,6 +167,7 @@ contract ProofHoursLedger is AccessControl, Pausable {
         if (governance == address(0) || address(badges_) == address(0)) revert InvalidAddress();
         badges = badges_;
         v1 = IVolunteerHoursV1(v1_); // may be zero where no V1 exists (e.g. a fresh test chain)
+        v1Cutoff = uint64(block.timestamp);
         _grantRole(DEFAULT_ADMIN_ROLE, governance);
         _grantRole(PAUSER_ROLE, governance);
     }
@@ -245,6 +253,10 @@ contract ProofHoursLedger is AccessControl, Pausable {
     function createEvent(string calldata code, Category category, uint16 maxHours, uint32 serviceDay) external whenNotPaused returns (uint256 eventId) {
         uint256 orgId = _activeCoordinatorOrg();
         if (maxHours == 0 || maxHours > 24) revert InvalidDuration(maxHours);
+        uint32 today = uint32(block.timestamp / 1 days);
+        if (serviceDay == 0 || uint256(serviceDay) + MAX_BACKDATE_DAYS < today || serviceDay > uint256(today) + MAX_SCHEDULE_DAYS) {
+            revert InvalidServiceDay(serviceDay, today);
+        }
         eventId = ++eventCount;
         _events[eventId] = Event(orgId, category, maxHours, serviceDay, msg.sender, code);
         emit EventCreated(eventId, orgId, category, maxHours, serviceDay, code);
@@ -287,6 +299,7 @@ contract ProofHoursLedger is AccessControl, Pausable {
         uint16 maxHours = _events[head.eventId].maxHours;
         if (newHours == 0 || newHours > maxHours) revert InvalidHours(newHours, maxHours);
         uint16 oldHours = head.hoursLogged;
+        if (newHours > oldHours && !optedIn[head.volunteer]) revert NotOptedIn(head.volunteer); // opt-out stops increases too
         if (newHours > oldHours) _chargeCaps(head.volunteer, head.serviceDay, head.category, head.orgId, newHours - oldHours);
         else dayHours[head.volunteer][head.serviceDay] -= oldHours - newHours;
         id = _supersede(head, newHours, EntryType.Correction, reason, msg.sender);
@@ -317,24 +330,28 @@ contract ProofHoursLedger is AccessControl, Pausable {
         if (address(v1) == address(0)) revert V1NotConfigured();
         if (!optedIn[msg.sender]) revert NotOptedIn(msg.sender);
         if (v1Migrated[v1Id] != 0) revert AlreadyMigrated(v1Id, v1Migrated[v1Id]);
-        v1LinkRequest[v1Id] = msg.sender;
+        v1LinkRequested[v1Id][msg.sender] = true;
         emit V1LinkRequested(v1Id, msg.sender);
     }
 
-    /// Step 2, the NGO wallet that originally issued the V1 record confirms (off-chain it checks the student's
-    /// receipt). Imports the V1 record's current effective hours into the volunteer's V2 totals.
-    function approveV1Link(uint256 v1Id, Category category) external whenNotPaused returns (uint256 id) {
+    /// Step 2, the NGO wallet that originally issued the V1 record confirms the wallet it checked off-chain (the
+    /// student's receipt). Naming the wallet means a front-running request from anyone else can't redirect the import.
+    /// Imports the V1 record's current effective hours into the volunteer's V2 totals.
+    function approveV1Link(uint256 v1Id, address volunteer, Category category) external whenNotPaused returns (uint256 id) {
         if (address(v1) == address(0)) revert V1NotConfigured();
-        address volunteer = v1LinkRequest[v1Id];
-        if (volunteer == address(0)) revert NoLinkRequest(v1Id);
+        if (!v1LinkRequested[v1Id][volunteer]) revert NoLinkRequest(v1Id);
         if (v1Migrated[v1Id] != 0) revert AlreadyMigrated(v1Id, v1Migrated[v1Id]);
+        if (!optedIn[volunteer]) revert NotOptedIn(volunteer); // consent may have been withdrawn since the request
         uint256 orgId = _activeCoordinatorOrg();
         IVolunteerHoursV1.V1Record memory original = v1.getRecord(v1Id);
         if (original.entryType != 0) revert NotV1Original(v1Id);
         if (original.issuer != msg.sender) revert NotV1Issuer(v1Id, msg.sender, original.issuer);
+        // V1 is still writable by its coordinators: only history from before V2 counts, so V1 can't mint around V2's caps
+        if (original.recordedAt > v1Cutoff) revert V1RecordTooNew(v1Id, original.recordedAt, v1Cutoff);
         uint16 hoursNow = _v1EffectiveHours(v1Id);
+        _chargeOrgCap(orgId, hoursNow);
 
-        delete v1LinkRequest[v1Id];
+        delete v1LinkRequested[v1Id][volunteer];
         id = _append(Record(0, 0, volunteer, hoursNow, EntryType.MigratedV1, category, orgId, msg.sender, uint64(block.timestamp), 0, 0, 0, bytes32(0), bytes32(0), v1Id));
         v1Migrated[v1Id] = id;
         _originals[volunteer].push(id);
@@ -351,6 +368,13 @@ contract ProofHoursLedger is AccessControl, Pausable {
         uint16 v1Now = _v1EffectiveHours(v1Id);
         uint16 oldHours = head.hoursLogged;
         if (v1Now == oldHours) revert NothingToSync(v1Id);
+        if (v1Now > oldHours) {
+            // decreases always mirror (they only remove hours); increases obey pause, suspension, consent and the NGO cap
+            _requireNotPaused();
+            if (_orgs[head.orgId].suspended) revert OrgIsSuspended(head.orgId);
+            if (!optedIn[head.volunteer]) revert NotOptedIn(head.volunteer);
+            _chargeOrgCap(head.orgId, v1Now - oldHours);
+        }
         if (v1Now == 0) {
             id = _supersede(head, 0, EntryType.Revocation, V1_SYNC_REASON, address(this));
             emit RecordRevoked(id, head.id, head.volunteer, V1_SYNC_REASON);
@@ -427,6 +451,10 @@ contract ProofHoursLedger is AccessControl, Pausable {
         uint256 v = dayHours[volunteer][day] + addHours;
         if (v > cap) revert DailyCapExceeded(volunteer, day, v, cap);
         dayHours[volunteer][day] = v;
+        _chargeOrgCap(orgId, addHours);
+    }
+
+    function _chargeOrgCap(uint256 orgId, uint256 addHours) internal {
         uint32 today = uint32(block.timestamp / 1 days);
         uint256 o = orgDayIssued[orgId][today] + addHours;
         uint32 orgCap = _orgs[orgId].dailyIssueCap;

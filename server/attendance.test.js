@@ -23,12 +23,18 @@ async function setup() {
     optedIn: async (a) => chain.opted.has(a),
     orgSuspended: async (id) => !!chain.suspended[id],
     event: async (id) => chain.events[id] ?? null,
+    org: async (id) => ({ suspended: !!chain.suspended[id], dailyIssueCap: chain.caps[id] ?? 500 }),
+    hasRecord: async (e, a) => chain.has.has(`${e}:${a}`),
+    dayHours: async (a) => chain.day[a] ?? 0,
+    orgDayIssued: async (id) => chain.orgIssued[id] ?? 0,
+    caps: {}, has: new Set(), day: {}, orgIssued: {},
     issued: async (h) => chain.logs[h] ?? [],
     recs: {},
     totalHours: async (a) => (chain.recs[a] ?? []).reduce((x, r) => x + r.hours, 0),
     records: async (a) => chain.recs[a] ?? [],
   };
-  const server = http.createServer(createApp({ db: openDb(":memory:"), chain, secret: "test-secret", chainId: 31337, now: () => clock }));
+  const app = { db: openDb(":memory:") };
+  const server = http.createServer(createApp({ db: app.db, chain, secret: "test-secret", chainId: 31337, now: () => clock }));
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, path, token, body) => {
@@ -45,7 +51,7 @@ async function setup() {
   await refresh();
   const shift = async (over = {}) => (await call("POST", "/shifts", tok.coord, { eventId: 1, start: sec(T0) - 600, end: sec(T0) + 4 * 3600, capacity: 10, ...over })).body;
   const qr = async (id, kind = "in") => (await call("GET", `/shifts/${id}/qr?kind=${kind}`, tok.coord)).body.token;
-  return { coord, coord2, vol, vol2, outsider, chain, wallets: { coord, coord2, vol, vol2, outsider }, call, signIn, tok, shift, qr, advance: async (s, keepSessions) => { clock += s * 1000; if (!keepSessions) await refresh(); }, /* sessions last 2 h */ close: () => server.close() };
+  return { base, db: app.db, coord, coord2, vol, vol2, outsider, chain, wallets: { coord, coord2, vol, vol2, outsider }, call, signIn, tok, shift, qr, advance: async (s, keepSessions) => { clock += s * 1000; if (!keepSessions) await refresh(); }, /* sessions last 2 h */ close: () => server.close() };
 }
 
 test("sign-in: one-time nonce, wallet must match, tokens can't be forged or outlive their expiry", async (t) => {
@@ -107,7 +113,7 @@ test("QR codes: forged, wrong kind, expired and replayed codes are refused", asy
   assert.equal((await s.call("POST", "/checkin", s.tok.outsider, { token })).status, 403, "wallet not opted in");
   const ok = await s.call("POST", "/checkin", s.tok.vol, { token, atSite: true });
   assert.equal(ok.status, 200);
-  assert.deepEqual([ok.body.status, ok.body.atSiteIn], ["checked_in", true]);
+  assert.deepEqual([ok.body.status, ok.body.atSiteIn], ["checked_in", null], "no site area, and a client's own yes/no is ignored");
   assert.match((await s.call("POST", "/checkin", s.tok.vol, { token })).body.error, /already checked in/, "replay");
   await s.advance(2 * QR_WINDOW);
   assert.match((await s.call("POST", "/checkin", s.tok.vol2, { token })).body.error, /expired/);
@@ -136,13 +142,13 @@ test("check-in rules: window, capacity, no overlapping attendance, one per event
 test("approval: QR and location alone issue nothing; durations computed and capped; only the NGO's coordinator decides", async (t) => {
   const s = await setup();
   t.after(s.close);
-  const sh = await s.shift({ eventId: 3, start: sec(T0) - 3600, end: sec(T0) + 10 * 3600 });
-  const a = (await s.call("POST", "/checkin", s.tok.vol, { token: await s.qr(sh.id), atSite: true, lat: 1, lng: 2 })).body;
-  assert.equal(a.atSiteIn, true);
+  const sh = await s.shift({ eventId: 3, start: sec(T0) - 3600, end: sec(T0) + 10 * 3600, site: { lat: 25.2, lng: 55.27, radius: 200 } });
+  const a = (await s.call("POST", "/checkin", s.tok.vol, { token: await s.qr(sh.id), location: { lat: 25.2005, lng: 55.2705, accuracy: 15 } })).body;
+  assert.equal(a.atSiteIn, true, "the server compares the reading with the site area");
   assert.match((await s.call("POST", `/attendance/${a.id}/approve`, s.tok.coord)).body.error, /not checked out/);
   await s.advance(9.5 * 3600);
-  const out = (await s.call("POST", "/checkout", s.tok.vol, { token: await s.qr(sh.id, "out"), atSite: "yes" })).body;
-  assert.deepEqual([out.status, out.atSiteOut], ["checked_out", null], "only real booleans are stored");
+  const out = (await s.call("POST", "/checkout", s.tok.vol, { token: await s.qr(sh.id, "out"), atSite: true, location: { lat: 25.3, lng: 55.27, accuracy: 20 } })).body;
+  assert.deepEqual([out.status, out.atSiteOut], ["checked_out", false], "11 km away is off-site, whatever the client claims");
   assert.deepEqual((await s.call("GET", `/shifts/${sh.id}/issuable`, s.tok.coord)).body.volunteers, [], "checked in and out, but nothing to issue before approval");
   const list = (await s.call("GET", `/shifts/${sh.id}/attendance`, s.tok.coord)).body;
   assert.equal(list[0].hours, 8, "9.5 h attended, capped at the event's 8 h maximum");
@@ -291,4 +297,111 @@ test("offline vouchers: coordinator-only, tamper-evident, single use, redemption
   assert.equal(JSON.parse(ok.evidence).source, "voucher", "the evidence says how attendance was recorded");
   await s.advance(8 * 86400);
   assert.match((await s.call("POST", "/vouchers/redeem", s.tok.vol2, { code: codes[2] })).body.error, /expired/);
+});
+
+// ---------- security regressions (backend review) ----------
+
+test("sign-in is Sign-In with Ethereum: domain-bound message, unknown origins refused, nonce bound to one wallet", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  const nonce = async (address, origin) => {
+    const r = await fetch(`${s.base}/auth/nonce`, { method: "POST", headers: { "content-type": "application/json", ...(origin ? { origin } : {}) }, body: JSON.stringify({ address }) });
+    return { status: r.status, body: await r.json() };
+  };
+  const ok = await nonce(s.vol.address, "http://localhost:8000");
+  assert.equal(ok.status, 200);
+  assert.match(ok.body.message, /^localhost:8000 wants you to sign in with your Ethereum account:\n0x[0-9a-fA-F]{40}\n/);
+  assert.match(ok.body.message, /\nURI: http:\/\/localhost:8000\nVersion: 1\nChain ID: 31337\nNonce: [0-9a-f]{32}\nIssued At: .+\nExpiration Time: .+$/);
+  assert.equal((await nonce(s.vol.address, "https://proofhours-login.example")).status, 403, "a look-alike site can't get a sign-in message");
+  // a nonce issued for vol can't be spent by another wallet, even with that wallet's own valid signature
+  const other = await s.call("POST", "/auth", null, { address: s.outsider.address, nonce: ok.body.nonce, signature: await s.outsider.signMessage(ok.body.message) });
+  assert.equal(other.status, 401);
+  // the indexer gets only the public key; it verifies real tokens
+  const { verify, publicKeyFrom } = require("./session");
+  const pub = (await s.call("GET", "/auth/public-key")).body.publicKey;
+  assert.equal(verify(publicKeyFrom(pub), `Bearer ${s.tok.vol}`, sec(T0)).address, s.vol.address);
+});
+
+test("bodies must be JSON objects: null, arrays and numbers get 400, not 500", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  for (const body of ["null", "[]", "7", '"x"']) {
+    const r = await fetch(`${s.base}/auth/nonce`, { method: "POST", headers: { "content-type": "application/json" }, body });
+    assert.equal(r.status, 400, body);
+  }
+});
+
+test("issuable: lines the ledger would refuse are held back with a reason, and approved rows can still be rejected", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  const crowd = Array.from({ length: 4 }, () => ethers.Wallet.createRandom()), toks = [];
+  for (const w of crowd) { s.chain.opted.add(w.address); toks.push(await s.signIn(w)); }
+  const sh = await s.shift({ capacity: 10 }), ids = [];
+  for (const tk of toks) ids.push((await s.call("POST", "/checkin", tk, { token: await s.qr(sh.id) })).body.id);
+  await s.advance(1.5 * 3600, true);
+  for (const tk of toks) await s.call("POST", "/checkout", tk, { token: await s.qr(sh.id, "out") });
+  for (const id of ids) await s.call("POST", `/attendance/${id}/approve`, s.tok.coord);
+  s.chain.opted.delete(crowd[0].address); // opted out after approval
+  s.chain.has.add(`1:${crowd[1].address}`); // already has a record for the event
+  s.chain.day[crowd[2].address] = 12; // already 12h that day, so any more is over the cap
+  const iss = (await s.call("GET", `/shifts/${sh.id}/issuable`, s.tok.coord)).body;
+  assert.deepEqual(iss.volunteers, [crowd[3].address], "only the line the ledger will accept goes into the batch");
+  assert.deepEqual(iss.blocked.map((b) => b.volunteer), crowd.slice(0, 3).map((w) => w.address));
+  assert.match(iss.blocked[0].reason, /opted out/);
+  assert.match(iss.blocked[1].reason, /already has a ledger record/);
+  assert.match(iss.blocked[2].reason, /past 12h/);
+  s.chain.orgIssued[1] = 500; // NGO cap used up today
+  assert.deepEqual((await s.call("GET", `/shifts/${sh.id}/issuable`, s.tok.coord)).body.volunteers, []);
+  const r = (await s.call("POST", `/attendance/${ids[0]}/reject`, s.tok.coord, { reason: "Opted out (demo)" })).body;
+  assert.equal(r.status, "rejected", "an approved row can be rejected, so it can't block the shift forever");
+});
+
+test("no double counting: a voucher and an open QR check-in can't cover the same time, in either order", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  // B: QR shift 08:00-12:00 (event 2); A: voucher shift 09:00-12:00 (event 1)
+  const b = await s.shift({ eventId: 2, start: sec(T0), end: sec(T0) + 4 * 3600 }), a = await s.shift({ start: sec(T0) + 3600, end: sec(T0) + 4 * 3600 });
+  const [code1, code2] = (await s.call("POST", `/shifts/${a.id}/vouchers`, s.tok.coord, { count: 2 })).body.codes;
+  assert.equal((await s.call("POST", "/checkin", s.tok.vol, { token: await s.qr(b.id) })).status, 200);
+  await s.advance(3.6 * 3600); // 11:36, voucher window open
+  assert.match((await s.call("POST", "/vouchers/redeem", s.tok.vol, { code: code1 })).body.error, /overlaps attendance/, "an open check-in runs until it is closed");
+  // other order: vol2 redeems first, then tries to check in to the overlapping QR shift
+  assert.equal((await s.call("POST", "/vouchers/redeem", s.tok.vol2, { code: code2 })).status, 200);
+  assert.match((await s.call("POST", "/checkin", s.tok.vol2, { token: await s.qr(b.id) })).body.error, /overlaps attendance/);
+});
+
+test("requireSite: the server checks the location reading and refuses check-in without one or from off-site", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  assert.equal((await s.call("POST", "/shifts", s.tok.coord, { eventId: 1, start: sec(T0), end: sec(T0) + 3600, capacity: 5, requireSite: true })).status, 400, "needs a site area");
+  const sh = await s.shift({ site: { lat: 25.2, lng: 55.27, radius: 100 }, requireSite: true });
+  assert.equal(sh.requireSite, true);
+  assert.match((await s.call("POST", "/checkin", s.tok.vol, { token: await s.qr(sh.id), atSite: true })).body.error, /needs your location/, "a bare yes from the client isn't enough");
+  assert.match((await s.call("POST", "/checkin", s.tok.vol, { token: await s.qr(sh.id), location: { lat: 25.3, lng: 55.27, accuracy: 10 } })).body.error, /don't seem to be at the site/);
+  assert.equal((await s.call("POST", "/checkin", s.tok.vol, { token: await s.qr(sh.id), location: { lat: 91, lng: 0 } })).status, 400);
+  const ok = (await s.call("POST", "/checkin", s.tok.vol, { token: await s.qr(sh.id), location: { lat: 25.2004, lng: 55.27, accuracy: 30 } })).body;
+  assert.equal(ok.atSiteIn, true);
+  assert.ok(!JSON.stringify(s.db.prepare("SELECT * FROM attendance").all()).includes("25.2004"), "coordinates are never stored");
+});
+
+test("issued: waits for confirmations; leagues need a verified hour; /metrics stays private behind a proxy", async (t) => {
+  const s = await setup();
+  t.after(s.close);
+  const sh = await s.shift();
+  const pending = ethers.id("tx-pending");
+  s.chain.logs[pending] = { pending: 2 };
+  assert.match((await s.call("POST", `/shifts/${sh.id}/issued`, s.tok.coord, { txHash: pending })).body.error, /2 more confirmation/);
+  s.chain.recs[s.vol.address] = [];
+  assert.match((await s.call("POST", "/league/join", s.tok.vol)).body.error, /first verified hour/);
+  assert.equal((await fetch(`${s.base}/metrics`, { headers: { "x-forwarded-for": "203.0.113.9" } })).status, 404, "a proxied request isn't treated as local");
+  assert.equal((await fetch(`${s.base}/metrics`)).status, 200, "direct local access still works");
+});
+
+test("rate limit behind a trusted proxy is per client (X-Forwarded-For), not one global bucket", async (t) => {
+  const server = http.createServer(createApp({ db: openDb(":memory:"), chain: {}, secret: "s", chainId: 31337, rateLimit: 2, trustProxy: true }));
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  t.after(() => server.close());
+  const get = (ip) => fetch(`http://127.0.0.1:${server.address().port}/health`, { headers: { "x-forwarded-for": `198.51.100.1, ${ip}` } }).then((r) => r.status);
+  assert.deepEqual([await get("203.0.113.1"), await get("203.0.113.1"), await get("203.0.113.1")], [200, 200, 429]);
+  assert.equal(await get("203.0.113.2"), 200, "another client still gets through");
 });

@@ -10,13 +10,14 @@ Local and testnet only. Any public deployment, public hosting or real-data use n
 | Indexer + search | `node server/indexer.js` | 8792 | derived cache only (`server/data/indexer.sqlite`) | `GET /health` (`behind`, `reorgs`) | `GET /metrics` |
 | Contracts | V1 (live, untouched), V2 (local fork only) | chain | records, totals, badges | n/a | n/a |
 
-**Shared secret:** both services read the same `ATTENDANCE_SECRET`. It signs sessions, QR codes and vouchers, and the credential issuer key and the vault master key are derived from it (a KMS in production; see §5e).
+**Secrets:** only the attendance service reads `ATTENDANCE_SECRET`. Each use has its own HKDF subkey: the Ed25519 session key, QR and voucher MACs, the credential issuer key and the vault master key (a KMS in production; see §5e). The indexer gets `SESSION_PUBLIC_KEY` (printed by the attendance service at start-up and served at `GET /auth/public-key`), which can verify sessions but not create them.
 
 ## 2. Start and stop
 ```bash
-export ATTENDANCE_SECRET=<32+ random bytes, from a secret store>   # same value for both
-node server/attendance.js     # refuses to start without ATTENDANCE_SECRET; RATE_LIMIT=300/min per client by default; LOG_REQUESTS=0 to silence access logs
-node server/indexer.js        # RATE_LIMIT=600; CONFIRMATIONS=2; START_BLOCK found automatically
+export ATTENDANCE_SECRET=<32+ random bytes, from a secret store>   # attendance service only
+node server/attendance.js     # refuses to start without ATTENDANCE_SECRET (and, on a public chain, without APP_ORIGINS); prints SESSION_PUBLIC_KEY
+SESSION_PUBLIC_KEY=<from the line above> node server/indexer.js   # START_BLOCK required on public chains; found automatically on a local fork
+# behind a reverse proxy: TRUST_PROXY=1 on both (per-client rate limits); METRICS_TOKEN=<random> to read /metrics through it
 ```
 - **Env file:** `node --env-file=.env attendance.js` (template: `server/.env.example`).
 - **Stop:** send Ctrl+C / SIGTERM. SQLite commits each request, so no write is half-done.
@@ -62,7 +63,7 @@ node server/indexer.js        # RATE_LIMIT=600; CONFIRMATIONS=2; START_BLOCK fou
 - **Corruption:** if you suspect the cache is corrupted, stop the indexer, delete its database and start it again.
 
 ### e. `ATTENDANCE_SECRET` leaked
-1. **Rotate:** generate a new secret and restart both services with it.
+1. **Rotate:** generate a new secret, restart the attendance service with it, and give the indexer the new `SESSION_PUBLIC_KEY`. (A leaked indexer host exposes only the public key: nothing to rotate.)
 2. **Expected effects:**
    - all sign-in sessions, live QR codes and unredeemed vouchers stop working (people sign in again; coordinators reprint vouchers);
    - **the credential issuer key changes, so previously issued credentials no longer verify against the new issuer**, and holders must re-issue them;

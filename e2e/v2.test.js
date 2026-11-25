@@ -138,7 +138,7 @@ async function run(base) {
     check("volunteer requests link to V1 record #1", /Link to V1 record #1 requested/.test(m), m);
     const q = await L.openPage(b, url, { wallet: L.impersonatingWallet, args: [L.ADMIN, FORK] });
     await nav(q, "issue2", 2500);
-    await q.evaluate(() => { document.querySelector("#v1ApproveId").value = "1"; document.querySelector("#v1ApproveCat").value = "0"; });
+    await q.evaluate((w) => { document.querySelector("#v1ApproveWallet").value = w; document.querySelector("#v1ApproveId").value = "1"; document.querySelector("#v1ApproveCat").value = "0"; }, vol.address);
     m = await submit(q, "v1ApproveForm");
     check("V1 issuer approves → 'V1 record #1 imported as #3 (4h)'", /V1 record #1 imported as #3 \(4h\)/.test(m), m);
     await q.close();
